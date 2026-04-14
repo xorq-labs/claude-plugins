@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "xorq": {
+      "command": "xorq",
+      "args": ["mcp", "serve"]
+    }
+  }
+}

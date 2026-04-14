@@ -1,0 +1,12 @@
+{
+  "name": "xorq",
+  "description": "Build, version, and run composable data expressions with xorq",
+  "version": "0.1.0",
+  "author": {
+    "name": "xorq",
+    "url": "https://github.com/xorq-labs/xorq"
+  },
+  "repository": "https://github.com/xorq-labs/xorq",
+  "license": "Apache-2.0",
+  "keywords": ["data", "pipeline", "catalog", "expressions", "arrow"]
+}
