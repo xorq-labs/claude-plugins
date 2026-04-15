@@ -17,4 +17,5 @@ testpaths = ["tests"]
 dev = [
     "polars>=1.39.3",
     "pytest>=9.0.3",
+    "xorq>=0.3.19",
 ]
