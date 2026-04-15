@@ -22,10 +22,10 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 # --- Setup: sample data ---
 
 cat > "$DATADIR/sales.csv" << 'CSV'
-date,product,quantity,price
-2026-01-01,Widget,10,29.99
-2026-01-02,Gadget,5,49.99
-2026-01-03,Widget,8,29.99
+id,date,product,quantity,price
+1,2026-01-01,Widget,10,29.99
+2,2026-01-02,Gadget,5,49.99
+3,2026-01-03,Widget,8,29.99
 CSV
 
 cat > "$DATADIR/regions.csv" << 'CSV'
@@ -78,8 +78,9 @@ git -C "$WORKDIR" add -A && git -C "$WORKDIR" commit -q -m "add data and catalog
 echo "=== Running Claude ==="
 
 PLUGIN_DIR="/Users/paddy/-plugins/xorq"
+DETECT_PK_SCRIPT="/Users/paddy/-plugins/lib/detect_pk_and_store.py"
 
-PROMPT="Import all CSV files from the data/ directory into the catalog at catalog/. Use the /xorq:recon-import skill."
+PROMPT="Import all CSV files from the data/ directory into the catalog at catalog/. Use the /xorq:recon-import skill. The plugin directory is /Users/paddy/-plugins."
 
 claude -p "$PROMPT" \
   --output-format text \
@@ -115,6 +116,29 @@ if echo "$SALES_RUN" | grep -q "Widget"; then pass "sales runs correctly"; else 
 
 REGIONS_RUN=$(uvx xorq catalog --path "$CATALOG" run regions --limit 3 -f csv -o /dev/stdout 2>/dev/null)
 if echo "$REGIONS_RUN" | grep -q "Alice"; then pass "regions runs correctly"; else fail "regions run failed: $REGIONS_RUN"; fi
+
+# Check PK metadata
+SALES_PK=$(uvx --from xorq python -c "
+import yaml
+from xorq.catalog.catalog import Catalog
+cat = Catalog.from_repo_path('$CATALOG')
+entry = next(a.catalog_entry for a in cat.catalog_aliases if a.alias == 'sales')
+meta = yaml.safe_load(entry.metadata_path.read_text()) or {}
+pk = meta.get('primary_key')
+print(' + '.join(pk) if pk else 'none')
+" 2>/dev/null)
+if [ "$SALES_PK" = "id" ]; then pass "sales PK in metadata: $SALES_PK"; else fail "sales PK metadata: $SALES_PK"; fi
+
+REGIONS_PK=$(uvx --from xorq python -c "
+import yaml
+from xorq.catalog.catalog import Catalog
+cat = Catalog.from_repo_path('$CATALOG')
+entry = next(a.catalog_entry for a in cat.catalog_aliases if a.alias == 'regions')
+meta = yaml.safe_load(entry.metadata_path.read_text()) or {}
+pk = meta.get('primary_key')
+print(' + '.join(pk) if pk else 'none')
+" 2>/dev/null)
+if [ "$REGIONS_PK" = "region" ]; then pass "regions PK in metadata: $REGIONS_PK"; else fail "regions PK metadata: $REGIONS_PK"; fi
 
 # --- Summary ---
 

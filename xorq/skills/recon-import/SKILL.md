@@ -70,7 +70,21 @@ Capture the last line of stdout — that's the build directory path. The `2>/dev
 uvx xorq catalog --path <catalog_path> add "$BUILD_PATH" --alias <alias>
 ```
 
-### 4. Verify each import
+### 4. Detect and store primary key
+
+After adding each entry, detect the primary key and store it in the catalog metadata. Run the detection script that ships with this plugin:
+
+```bash
+uvx --from xorq python <plugin_dir>/lib/detect_pk_and_store.py <catalog_path> <alias> <absolute_path_to_source_file>
+```
+
+Where `<plugin_dir>` is the directory containing this plugin (the parent of `xorq/skills/`). The script:
+- Reads the source file via xorq
+- Detects single or composite PKs (up to 4 columns) using uniqueness analysis
+- Writes `primary_key: [col, ...]` into the catalog entry's `.metadata.yaml`
+- Prints the detected PK (or "none detected")
+
+### 5. Verify each import
 
 After adding, verify the schema:
 
@@ -80,13 +94,13 @@ uvx xorq catalog --path <catalog_path> schema <alias>
 
 Confirm the columns and types look correct.
 
-### 5. Clean up
+### 6. Clean up
 
 Remove the temp Python scripts you created.
 
-### 6. Summarize
+### 7. Summarize
 
 Report:
-- **Imported**: list of aliases successfully added
+- **Imported**: list of aliases successfully added, with detected PK for each
 - **Skipped**: list of files skipped (already existed)
 - **Failed**: list of files that failed (with error)

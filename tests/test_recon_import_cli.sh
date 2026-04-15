@@ -21,10 +21,10 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 # --- Setup: create sample data ---
 
 cat > "$DATADIR/sales.csv" << 'CSV'
-date,product,quantity,price
-2026-01-01,Widget,10,29.99
-2026-01-02,Gadget,5,49.99
-2026-01-03,Widget,8,29.99
+id,date,product,quantity,price
+1,2026-01-01,Widget,10,29.99
+2,2026-01-02,Gadget,5,49.99
+3,2026-01-03,Widget,8,29.99
 CSV
 
 cat > "$DATADIR/regions.csv" << 'CSV'
@@ -33,6 +33,8 @@ North,Alice
 South,Bob
 East,Carol
 CSV
+
+DETECT_PK_SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/lib/detect_pk_and_store.py"
 
 # --- Init catalog ---
 
@@ -60,6 +62,9 @@ if echo "$ALIASES" | grep -q "sales"; then pass "sales alias exists"; else fail 
 SCHEMA=$(uvx xorq catalog --path "$CATALOG" schema sales 2>/dev/null)
 if echo "$SCHEMA" | grep -q "product"; then pass "sales schema has product column"; else fail "sales schema missing product"; fi
 
+PK_OUTPUT=$(uvx --from xorq python "$DETECT_PK_SCRIPT" "$CATALOG" sales "$DATADIR/sales.csv" 2>/dev/null)
+if echo "$PK_OUTPUT" | grep -q "PK: id"; then pass "sales PK detected: id"; else fail "sales PK wrong: $PK_OUTPUT"; fi
+
 # --- Test 2: Second CSV import (regions) ---
 
 echo "=== Test 2: Import regions.csv ==="
@@ -77,6 +82,9 @@ if echo "$ALIASES" | grep -q "regions"; then pass "regions alias exists"; else f
 
 SCHEMA=$(uvx xorq catalog --path "$CATALOG" schema regions 2>/dev/null)
 if echo "$SCHEMA" | grep -q "manager"; then pass "regions schema has manager column"; else fail "regions schema missing manager"; fi
+
+PK_OUTPUT=$(uvx --from xorq python "$DETECT_PK_SCRIPT" "$CATALOG" regions "$DATADIR/regions.csv" 2>/dev/null)
+if echo "$PK_OUTPUT" | grep -q "PK: region"; then pass "regions PK detected: region"; else fail "regions PK wrong: $PK_OUTPUT"; fi
 
 # --- Test 3: Duplicate detection ---
 
@@ -129,13 +137,42 @@ PYEOF
 
     RUN_OUTPUT=$(uvx xorq catalog --path "$CATALOG" run items --limit 3 -f csv -o /dev/stdout 2>/dev/null)
     if echo "$RUN_OUTPUT" | grep -q "alpha"; then pass "parquet runs correctly"; else fail "parquet run failed: $RUN_OUTPUT"; fi
+
+    PK_OUTPUT=$(uvx --from xorq python "$DETECT_PK_SCRIPT" "$CATALOG" items "$DATADIR/items.parquet" 2>/dev/null)
+    if echo "$PK_OUTPUT" | grep -q "PK: id"; then pass "parquet PK detected: id"; else fail "parquet PK wrong: $PK_OUTPUT"; fi
 else
     echo "  SKIP: pyarrow not available"
 fi
 
-# --- Test 6: Alias count ---
+# --- Test 6: PK metadata persisted in catalog ---
 
-echo "=== Test 6: Final alias count ==="
+echo "=== Test 6: PK metadata readback ==="
+
+SALES_PK=$(uvx --from xorq python -c "
+import yaml
+from xorq.catalog.catalog import Catalog
+cat = Catalog.from_repo_path('$CATALOG')
+entry = next(a.catalog_entry for a in cat.catalog_aliases if a.alias == 'sales')
+meta = yaml.safe_load(entry.metadata_path.read_text()) or {}
+pk = meta.get('primary_key')
+print(' + '.join(pk) if pk else 'none')
+" 2>/dev/null)
+if [ "$SALES_PK" = "id" ]; then pass "sales PK persisted in metadata: $SALES_PK"; else fail "sales PK metadata wrong: $SALES_PK"; fi
+
+REGIONS_PK=$(uvx --from xorq python -c "
+import yaml
+from xorq.catalog.catalog import Catalog
+cat = Catalog.from_repo_path('$CATALOG')
+entry = next(a.catalog_entry for a in cat.catalog_aliases if a.alias == 'regions')
+meta = yaml.safe_load(entry.metadata_path.read_text()) or {}
+pk = meta.get('primary_key')
+print(' + '.join(pk) if pk else 'none')
+" 2>/dev/null)
+if [ "$REGIONS_PK" = "region" ]; then pass "regions PK persisted in metadata: $REGIONS_PK"; else fail "regions PK metadata wrong: $REGIONS_PK"; fi
+
+# --- Test 7: Alias count ---
+
+echo "=== Test 7: Final alias count ==="
 
 ALIAS_COUNT=$(uvx xorq catalog --path "$CATALOG" list-aliases 2>/dev/null | grep -c ".")
 if [ "$ALIAS_COUNT" -ge 2 ]; then pass "alias count >= 2 ($ALIAS_COUNT)"; else fail "alias count too low: $ALIAS_COUNT"; fi
