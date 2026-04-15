@@ -77,6 +77,7 @@ Add to `.claude/settings.json` or `claude_desktop_config.json`:
 |-------|-------------|
 | `/xorq:catalog-explore` | Discover and inspect catalog entries |
 | `/xorq:run-expression` | Build and run data expressions |
+| `/xorq:recon-import` | Bulk-import CSV and Parquet files into a catalog |
 
 ## Architecture
 
