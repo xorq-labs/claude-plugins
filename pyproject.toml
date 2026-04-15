@@ -1,0 +1,20 @@
+[project]
+name = "xorq-plugins"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = []
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "polars",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "polars>=1.39.3",
+    "pytest>=9.0.3",
+]
