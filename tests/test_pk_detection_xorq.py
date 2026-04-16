@@ -25,6 +25,7 @@ SEED = 7
 # Fixture helpers
 # ---------------------------------------------------------------------------
 
+
 def _filler_cols(n: int, prefix: str = "col") -> dict[str, list]:
     """Generate 10 non-unique filler columns (str/int/float mix)."""
     import random
@@ -49,6 +50,7 @@ def _filler_cols(n: int, prefix: str = "col") -> dict[str, list]:
 # Dataset 1: clear single-column PK
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def clear_single_pk():
     data = {"row_id": list(range(N))}
@@ -68,6 +70,7 @@ def test_clear_single_pk(clear_single_pk):
 # ---------------------------------------------------------------------------
 # Dataset 2: composite PK (two columns together unique, neither alone)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def composite_pk():
@@ -93,6 +96,7 @@ def test_composite_pk(composite_pk):
 # ---------------------------------------------------------------------------
 # Dataset 3: no PK — all columns have very low cardinality
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def no_pk():
@@ -120,6 +124,7 @@ def test_no_pk(no_pk):
 # ---------------------------------------------------------------------------
 # Dataset 4: near-miss PK — 99.8% unique (below 99.9% threshold)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def near_miss_pk():
@@ -149,6 +154,7 @@ def test_near_miss_pk_accepted_at_lower_threshold(near_miss_pk):
 # Dataset 5: multiple candidate single-column PKs
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def multiple_candidates():
     import random
@@ -176,6 +182,7 @@ def test_multiple_candidates_returns_first(multiple_candidates):
 # Edge cases
 # ---------------------------------------------------------------------------
 
+
 def test_empty_table():
     t = ibis.memtable({"a": [], "b": []})
     assert detect_pk(t) is None
@@ -191,13 +198,16 @@ def test_single_row():
 # Parametric: invariant checks across all 5 datasets
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(params=[
-    "clear_single_pk",
-    "composite_pk",
-    "no_pk",
-    "near_miss_pk",
-    "multiple_candidates",
-])
+
+@pytest.fixture(
+    params=[
+        "clear_single_pk",
+        "composite_pk",
+        "no_pk",
+        "near_miss_pk",
+        "multiple_candidates",
+    ]
+)
 def any_dataset(request):
     return request.getfixturevalue(request.param)
 
@@ -222,6 +232,7 @@ def test_detect_pk_result_columns_exist_in_table(any_dataset):
 # ---------------------------------------------------------------------------
 # Cross-check: xorq and polars implementations agree
 # ---------------------------------------------------------------------------
+
 
 def test_xorq_matches_polars_clear_single_pk():
     """Both implementations should find the same PK on the same data."""

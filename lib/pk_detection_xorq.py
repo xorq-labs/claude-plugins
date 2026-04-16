@@ -10,7 +10,6 @@ from __future__ import annotations
 from itertools import combinations
 from math import prod
 
-import xorq.vendor.ibis as ibis
 from xorq.vendor.ibis.expr.types import Table
 
 

@@ -20,7 +20,6 @@ import yaml
 def detect_pk_from_file(file_path: str, threshold: float = 0.999) -> list[str] | None:
     """Read a CSV/Parquet file via xorq and detect primary key."""
     import xorq.api as xo
-    import xorq.vendor.ibis as ibis
 
     if file_path.endswith((".parquet", ".parq")):
         table = xo.deferred_read_parquet(file_path)
@@ -86,7 +85,10 @@ def store_pk(catalog_path: str, alias: str, pk: list[str] | None) -> None:
 
 def main():
     if len(sys.argv) != 4:
-        print(f"usage: {sys.argv[0]} <catalog_path> <alias> <source_file>", file=sys.stderr)
+        print(
+            f"usage: {sys.argv[0]} <catalog_path> <alias> <source_file>",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     catalog_path, alias, source_file = sys.argv[1], sys.argv[2], sys.argv[3]

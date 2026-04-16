@@ -35,7 +35,6 @@ def detect_pk(df: pl.DataFrame, threshold: float = 0.999) -> list[str] | None:
 
     # Width 2–4: with pruning
     sample = df.sample(min(5_000, n), seed=42)
-    sample_n = len(sample)
 
     def uniqueness(frame: pl.DataFrame, col_names: list[str]) -> float:
         return frame.select(pl.struct(col_names).n_unique()).item() / len(frame)

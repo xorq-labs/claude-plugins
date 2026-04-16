@@ -27,6 +27,7 @@ SEED = 7
 # Fixture helpers — build 12-column DataFrames
 # ---------------------------------------------------------------------------
 
+
 def _filler_cols(n: int, prefix: str = "col") -> dict[str, list]:
     """Generate 10 non-unique filler columns (str/int/float mix)."""
     import random
@@ -54,6 +55,7 @@ def _filler_cols(n: int, prefix: str = "col") -> dict[str, list]:
 # Dataset 1: clear single-column PK
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def clear_single_pk() -> pl.DataFrame:
     """Row ID column is perfectly unique; 11 filler columns."""
@@ -74,6 +76,7 @@ def test_clear_single_pk(clear_single_pk):
 # ---------------------------------------------------------------------------
 # Dataset 2: composite PK (two columns together unique, neither alone)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def composite_pk() -> pl.DataFrame:
@@ -100,6 +103,7 @@ def test_composite_pk(composite_pk):
 # ---------------------------------------------------------------------------
 # Dataset 3: no PK — all columns have heavy duplication
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def no_pk() -> pl.DataFrame:
@@ -130,6 +134,7 @@ def test_no_pk(no_pk):
 # ---------------------------------------------------------------------------
 # Dataset 4: near-miss PK — 99.8% unique (below 99.9% threshold)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def near_miss_pk() -> pl.DataFrame:
@@ -163,6 +168,7 @@ def test_near_miss_pk_accepted_at_lower_threshold(near_miss_pk):
 # Dataset 5: multiple candidate single-column PKs
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def multiple_candidates() -> pl.DataFrame:
     """Two columns are each perfectly unique; detect_pk should return the first."""
@@ -191,6 +197,7 @@ def test_multiple_candidates_returns_first(multiple_candidates):
 # Edge cases
 # ---------------------------------------------------------------------------
 
+
 def test_empty_dataframe():
     df = pl.DataFrame({"a": [], "b": []}).cast({"a": pl.Int64, "b": pl.Int64})
     assert detect_pk(df) is None
@@ -206,13 +213,16 @@ def test_single_row():
 # Parametric: run detect_pk on all 5 fixtures and verify shape invariants
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(params=[
-    "clear_single_pk",
-    "composite_pk",
-    "no_pk",
-    "near_miss_pk",
-    "multiple_candidates",
-])
+
+@pytest.fixture(
+    params=[
+        "clear_single_pk",
+        "composite_pk",
+        "no_pk",
+        "near_miss_pk",
+        "multiple_candidates",
+    ]
+)
 def any_dataset(request) -> pl.DataFrame:
     return request.getfixturevalue(request.param)
 
