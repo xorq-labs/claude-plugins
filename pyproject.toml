@@ -7,7 +7,7 @@ dependencies = []
 [project.optional-dependencies]
 test = [
     "pytest",
-    "polars",
+    "xorq",
 ]
 
 [tool.pytest.ini_options]
@@ -15,7 +15,6 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
-    "polars>=1.39.3",
     "pytest>=9.0.3",
     "ruff>=0.15.10",
     "xorq>=0.3.19",

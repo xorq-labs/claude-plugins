@@ -1,7 +1,7 @@
-"""Benchmark: polars vs xorq PK detection on 1M-row, 12-column CSV files.
+"""Benchmark: xorq PK detection on 1M-row, 12-column CSV files.
 
-Generates 5 CSV files with different PK profiles, then times both
-implementations on each file.
+Generates 5 CSV files with different PK profiles, then times the
+xorq/DataFusion implementation on each file.
 
 Usage:
     uv run python tests/bench_pk_detection.py
@@ -114,34 +114,6 @@ def _write_csv(path: str, data: dict[str, list]) -> None:
             writer.writerow([data[c][i] for c in cols])
 
 
-def bench_polars(files: list[tuple[str, str, str]]) -> list[dict]:
-    import polars as pl
-    from pk_detection import detect_pk
-
-    results = []
-    for path, name, expected in files:
-        t0 = time.perf_counter()
-        df = pl.read_csv(path, infer_schema_length=1000)
-        t_load = time.perf_counter() - t0
-
-        t1 = time.perf_counter()
-        pk = detect_pk(df)
-        t_detect = time.perf_counter() - t1
-
-        results.append(
-            {
-                "name": name,
-                "engine": "polars",
-                "load_s": round(t_load, 3),
-                "detect_s": round(t_detect, 3),
-                "total_s": round(t_load + t_detect, 3),
-                "pk": pk,
-                "expected": expected,
-            }
-        )
-    return results
-
-
 def bench_xorq(files: list[tuple[str, str, str]]) -> list[dict]:
     import xorq.api as xo
     from pk_detection_xorq import detect_pk
@@ -159,7 +131,6 @@ def bench_xorq(files: list[tuple[str, str, str]]) -> list[dict]:
         results.append(
             {
                 "name": name,
-                "engine": "xorq",
                 "load_s": round(t_load, 3),
                 "detect_s": round(t_detect, 3),
                 "total_s": round(t_load + t_detect, 3),
@@ -170,38 +141,25 @@ def bench_xorq(files: list[tuple[str, str, str]]) -> list[dict]:
     return results
 
 
-def print_results(polars_results: list[dict], xorq_results: list[dict]) -> None:
-    header = (
-        f"{'file':<28} {'engine':<8} {'load':>7} {'detect':>8} {'total':>8}  {'pk'}"
-    )
-    print(f"\n{'=' * 90}")
-    print(f"PK detection benchmark — {N:,} rows x 12 columns")
-    print(f"{'=' * 90}")
+def print_results(results: list[dict]) -> None:
+    header = f"{'file':<28} {'load':>7} {'detect':>8} {'total':>8}  {'pk'}"
+    print(f"\n{'=' * 80}")
+    print(f"PK detection benchmark (xorq/DataFusion) — {N:,} rows x 12 columns")
+    print(f"{'=' * 80}")
     print(header)
-    print("-" * 90)
+    print("-" * 80)
 
-    for p, x in zip(polars_results, xorq_results):
+    for r in results:
+        pk_str = " + ".join(r["pk"]) if r["pk"] else "none"
         print(
-            f"{p['name']:<28} {'polars':<8} {p['load_s']:>6.3f}s {p['detect_s']:>7.3f}s {p['total_s']:>7.3f}s  {p['pk']}"
+            f"{r['name']:<28} {r['load_s']:>6.3f}s {r['detect_s']:>7.3f}s {r['total_s']:>7.3f}s  {pk_str}"
         )
-        print(
-            f"{'':<28} {'xorq':<8} {x['load_s']:>6.3f}s {x['detect_s']:>7.3f}s {x['total_s']:>7.3f}s  {x['pk']}"
-        )
-        speedup = p["detect_s"] / x["detect_s"] if x["detect_s"] > 0 else float("inf")
-        winner = "xorq" if speedup > 1 else "polars"
-        print(f"{'':<28} {'':>8} {'':>7} {f'  {speedup:.1f}x ({winner})':>20}")
-        print()
 
-    # Summary
-    total_polars = sum(r["detect_s"] for r in polars_results)
-    total_xorq = sum(r["detect_s"] for r in xorq_results)
-    print("-" * 90)
-    print(f"{'Total detect time':<28} {'polars':<8} {'':>7} {total_polars:>7.3f}s")
-    print(f"{'':28} {'xorq':<8} {'':>7} {total_xorq:>7.3f}s")
-    overall = total_polars / total_xorq if total_xorq > 0 else float("inf")
-    winner = "xorq" if overall > 1 else "polars"
-    print(f"{'':28} {'':>8} {'':>7} {f'  {overall:.1f}x ({winner})':>20}")
-    print(f"{'=' * 90}")
+    total_detect = sum(r["detect_s"] for r in results)
+    total_all = sum(r["total_s"] for r in results)
+    print("-" * 80)
+    print(f"{'Total':<28} {'':>7} {total_detect:>7.3f}s {total_all:>7.3f}s")
+    print(f"{'=' * 80}")
 
 
 def main():
@@ -218,22 +176,10 @@ def main():
         mb = os.path.getsize(path) / 1024 / 1024
         print(f"  {name:<28} {mb:>6.1f} MB")
 
-    print("\nRunning polars benchmark ...")
-    polars_results = bench_polars(files)
+    print("\nRunning xorq benchmark ...")
+    results = bench_xorq(files)
+    print_results(results)
 
-    print("Running xorq benchmark ...")
-    xorq_results = bench_xorq(files)
-
-    # Verify both agree on PKs
-    for p, x in zip(polars_results, xorq_results):
-        if p["pk"] != x["pk"]:
-            print(
-                f"\nWARNING: disagreement on {p['name']}: polars={p['pk']} xorq={x['pk']}"
-            )
-
-    print_results(polars_results, xorq_results)
-
-    # Cleanup
     print(f"\nBenchmark files in: {tmpdir}")
     print("(delete manually when done)")
 
