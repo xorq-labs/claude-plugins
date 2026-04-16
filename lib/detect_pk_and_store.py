@@ -62,14 +62,12 @@ def detect_pk_from_file(file_path: str, threshold: float = 0.999) -> list[str] |
 
 def store_pk(catalog_path: str, alias: str, pk: list[str] | None) -> None:
     """Write primary_key into catalog entry metadata."""
-    from xorq.catalog.catalog import Catalog
+    from xorq.catalog.catalog import Catalog, CatalogAlias
 
     cat = Catalog.from_repo_path(Path(catalog_path))
-    entry = next(
-        (a.catalog_entry for a in cat.catalog_aliases if a.alias == alias),
-        None,
-    )
-    if entry is None:
+    try:
+        entry = CatalogAlias.from_name(alias, cat).catalog_entry
+    except Exception:
         print(f"error: alias '{alias}' not found in catalog", file=sys.stderr)
         sys.exit(1)
 
