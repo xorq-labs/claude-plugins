@@ -1,0 +1,17 @@
+[project]
+name = "local-test"
+version = "0.1.0"
+description = "Local test project for xorq catalog"
+requires-python = ">=3.10"
+dependencies = [
+    "xorq",
+    "boring-semantic-layer",
+    "scikit-learn>=1.7.2",
+]
+
+[tool.setuptools]
+py-modules = []
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

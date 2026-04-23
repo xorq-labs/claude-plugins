@@ -1,0 +1,8 @@
+ok hey can you do some things for me can you use the data in
+  local_test/data add them to a catalog and then compose a new expression and
+  add that then make an ml expression and add that and then use that ml
+  expression on new data to make a new expression built from the old one. 
+
+  Also make use BSL to make an expression and add that to the catalog then get back the builder make a new expression. 
+
+  Then make a custom builder and the expression built with the custom builder into the catalog get it nack make a new expression and add that to the catalog

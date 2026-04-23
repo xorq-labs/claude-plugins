@@ -1,0 +1,21 @@
+.gitignore
+# local_test: track raw data and config, ignore generated artifacts
+local_test/.venv/
+local_test/data/builds/
+local_test/data/.claude/
+local_test/data/__pycache__/
+local_test/uv.lock
+local_test/iteration_log.md
+venv/\
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
