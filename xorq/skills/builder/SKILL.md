@@ -159,21 +159,17 @@ new_query = recovered_model.query(dimensions=["region"], measures=["avg_amount"]
 expr = new_query  # or recovered_model.to_tagged() for the full model
 ```
 
-**If `from_tagged` fails** (CatalogSource/HashingTag wrapping), use `.ls.get_tags()`:
+**`from_tagged(cat.load("alias"))` WILL FAIL** because catalog wraps with HashingTag. Use this verified recovery:
 
 ```python
-# Find the BSL tag inside the wrapped expression
 tags = loaded_expr.ls.get_tags()
-bsl_tags = [t for t in tags if t.op().tag == "bsl"]
-if bsl_tags:
-    recovered_model = from_tagged(bsl_tags[0])
+bsl_tag = [t for t in tags if hasattr(t, "tag") and t.tag == "bsl"][0]
+recovered_model = from_tagged(bsl_tag.to_expr())
 ```
 
-**IMPORTANT:** `model.query()` returns a `SemanticAggregate` which `xorq build` may reject. Call `.to_tagged()` on the result:
-```python
-queried = recovered_model.query(dimensions=["region"], measures=["avg_amount"])
-expr = queried.to_tagged()  # or just: expr = queried (if it's already a Table)
-```
+**IMPORTANT:** `.query()` returns `SemanticAggregate`. To make it buildable, either:
+- Use it directly as `expr = query_result` (works in most cases)
+- Or call `expr = query_result.to_tagged()` if build fails
 
 - The expression is tagged with `"bsl"` containing SemanticModel metadata
 - `entry.expr.ls.builder` recovers the `SemanticTableOp` for requerying (when not wrapped by CatalogSource)
