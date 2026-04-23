@@ -110,6 +110,7 @@ expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
 
 ## Common Pitfalls
 
+- **VIRTUAL_ENV mismatch**: If you see `VIRTUAL_ENV=... does not match the project environment path .venv`, always prefix uv/xorq commands with `unset VIRTUAL_ENV;` — e.g. `unset VIRTUAL_ENV; uv run xorq build script.py`
 - **pyproject.toml flat-layout error**: If `xorq catalog add` fails with `Multiple top-level packages discovered in a flat-layout`, add `[tool.setuptools]\npy-modules = []` to pyproject.toml
 - **ML Pipeline import**: `xo.Pipeline` is available directly via the API. Alternatively: `from xorq.expr.ml.pipeline_lib import Pipeline`
 - **ML Pipeline API**: Use `Pipeline.from_instance(sk_pipe).fit(train, features=[...], target="...").predict(train)`. Do NOT use `deferred_fit_predict` — it returns a non-buildable object
