@@ -47,7 +47,7 @@ Every catalog entry has a `kind` determined by its outermost structural layer:
 
 | Kind | Description | How it's created |
 |------|-------------|-----------------|
-| `Source` | Bound source with data (table/memtable) | `xo.connect().read_csv()`, `xo.connect().read_parquet()` |
+| `Source` | Bound source with data (table/memtable) | `xo.deferred_read_csv()`, `xo.deferred_read_parquet()` |
 | `Expr` | Bound transformation | Source + transforms (filter, join, etc.) |
 | `UnboundExpr` | Partial — contains UnboundTable, awaits input | Transform without a bound source |
 | `Composed` | From catalog composition | `xorq catalog compose` |
@@ -83,8 +83,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 
-con = xo.connect()
-train_expr = con.read_csv("/path/to/train.csv")
+train_expr = xo.deferred_read_csv("/path/to/train.csv")
 
 sk_pipe = make_pipeline(StandardScaler(), LogisticRegression())
 pipeline = Pipeline.from_instance(sk_pipe)

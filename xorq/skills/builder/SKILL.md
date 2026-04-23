@@ -31,8 +31,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 
 # Load training data — use ABSOLUTE paths
-con = xo.connect()
-train = con.read_csv("/absolute/path/to/train.csv")
+train = xo.deferred_read_csv("/absolute/path/to/train.csv")
 
 # Create and fit pipeline
 sk_pipe = make_pipeline(StandardScaler(), LogisticRegression())
@@ -97,8 +96,7 @@ ml_expr = cat.load("<model-name>")  # NOT catalog["name"] — use .load()
 fitted_pipeline = ml_expr.ls.builder
 
 # Predict on new data
-con = xo.connect()
-new_data = con.read_csv("/absolute/path/to/test.csv")
+new_data = xo.deferred_read_csv("/absolute/path/to/test.csv")
 predictions = fitted_pipeline.predict(new_data)
 expr = predictions  # this is what xorq build captures
 ```
@@ -106,7 +104,7 @@ expr = predictions  # this is what xorq build captures
 **IMPORTANT API notes:**
 - `xo.catalog()` is a MODULE, not callable — use `from xorq.catalog.catalog import Catalog; Catalog.from_default()`
 - Use `cat.load("alias")` — NOT `cat["alias"]` (no subscript support)
-- Use `xo.connect().read_csv()` — NOT `xo.read_csv()` (doesn't exist)
+- Use `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` for reading data in build scripts
 
 ## BSL (Boring Semantic Layer)
 
@@ -120,8 +118,7 @@ BSL entries wrap expressions with semantic model metadata (dimensions, measures,
 import xorq.api as xo
 from boring_semantic_layer import SemanticModel, Dimension, Measure
 
-con = xo.connect()
-source = con.read_csv("/absolute/path/to/data.csv")
+source = xo.deferred_read_csv("/absolute/path/to/data.csv")
 
 # Dimensions and measures are DICTS (not lists), values use lambda expr
 model = SemanticModel(
@@ -195,8 +192,7 @@ register_tag_handler(TagHandler(
 ))
 
 # Tag an expression — use string tag name + kwargs (NOT a dict!)
-con = xo.connect()
-source = con.read_csv("/absolute/path/to/data.csv")
+source = xo.deferred_read_csv("/absolute/path/to/data.csv")
 expr = source.tag("my_custom_tag", column="age", threshold=0.5)
 # tag_node.metadata will be {"tag": "my_custom_tag", "column": "age", "threshold": 0.5}
 ```
@@ -214,8 +210,7 @@ register_tag_handler(TagHandler(
     from_tag_node=lambda tn: dict(tn.metadata),
 ))
 
-con = xo.connect()
-source = con.read_csv("/path/to/data.csv")
+source = xo.deferred_read_csv("/path/to/data.csv")
 expr = source.tag("my_custom_tag", column="age", transform="filter_positive")
 ```
 
@@ -237,8 +232,7 @@ loaded_expr = cat.load("my_tagged_entry")
 builder = loaded_expr.ls.builder  # returns dict from from_tag_node
 
 # Use recovered metadata to create a new expression
-con = xo.connect()
-new_data = con.read_csv("/path/to/new_data.csv")
+new_data = xo.deferred_read_csv("/path/to/new_data.csv")
 expr = new_data.tag("my_custom_tag", **{k: v for k, v in builder.items() if k != "tag"}, derived=True)
 ```
 
