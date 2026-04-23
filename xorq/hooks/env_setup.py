@@ -17,7 +17,11 @@ name = "xorq-workspace"
 version = "0.1.0"
 description = "xorq workspace"
 requires-python = ">=3.10,<3.14"
-dependencies = ["xorq", "boring-semantic-layer", "scikit-learn"]
+dependencies = [
+    "xorq",
+    "boring-semantic-layer @ git+https://github.com/boringdata/boring-semantic-layer.git@main",
+    "scikit-learn",
+]
 
 [build-system]
 requires = ["setuptools>=61.0"]
