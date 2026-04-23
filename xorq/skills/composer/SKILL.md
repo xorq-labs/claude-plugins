@@ -43,14 +43,25 @@ xorq catalog compose <source> -c "source.filter(source.amount > 15)" -a <alias>
 
 **IMPORTANT:** Only entries with `kind=UnboundExpr` can be used as transform entries. You CANNOT compose two `Source` entries together (e.g., to join them). To join two sources, use inline code (`-c`) on one source and reference the other via Python:
 
-**Joining two source entries (use inline code):**
+**Joining two source entries (use a build script — NOT inline code):**
+
+Inline `-c` code must be a **single expression** (no imports, no assignments). For joins or anything requiring multiple statements, write a build script instead:
+
+```python
+# join_sources.py
+import xorq.api as xo
+from xorq.catalog.catalog import Catalog
+
+cat = Catalog.from_default()
+source1 = cat.load("entry1")
+source2 = cat.load("entry2")
+
+expr = source1.join(source2, "join_key").select("col1", "col2", "col3")
+```
 
 ```bash
-xorq catalog compose <source1> -c "
-import xorq.api as xo
-other = xo.deferred_read_csv('path/to/other.csv')
-source.join(other, 'join_key').select('col1', 'col2', 'col3')
-" -a <alias>
+xorq build join_sources.py
+xorq catalog add builds/<hash> -a <alias>
 ```
 
 **Source + transforms (unbound_expr only):**
@@ -65,7 +76,7 @@ xorq catalog compose <source> <transform1> <transform2> -a <alias>
 xorq catalog compose <source> -c "source.filter(source.amount > 15)" -a <alias>
 ```
 
-The inline code receives the expression as the `source` variable.
+The inline code receives the expression as the `source` variable. **`-c` must be a single expression on one line** — no imports, no assignments, no multiline code. For anything more complex, write a build script.
 
 **Preview without cataloging (dry run):**
 

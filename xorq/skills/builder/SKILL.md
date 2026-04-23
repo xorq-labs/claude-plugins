@@ -140,6 +140,8 @@ expr = model.to_tagged()
 
 ### Recovery from catalog
 
+**`from_tagged(cat.load("alias"))` WILL FAIL** because catalog wraps with HashingTag. You MUST walk the tags to find the BSL tag node:
+
 ```python
 from boring_semantic_layer import from_tagged
 from xorq.catalog.catalog import Catalog
@@ -147,23 +149,29 @@ from xorq.catalog.catalog import Catalog
 cat = Catalog.from_default()
 loaded_expr = cat.load("my_bsl_entry")
 
-# from_tagged recovers the SemanticModel — can then .query() with new dims
-recovered_model = from_tagged(loaded_expr)
-new_query = recovered_model.query(dimensions=["region"], measures=["avg_amount"])
-expr = new_query  # or recovered_model.to_tagged() for the full model
-```
-
-**`from_tagged(cat.load("alias"))` WILL FAIL** because catalog wraps with HashingTag. Use this verified recovery:
-
-```python
+# Walk tags to find the BSL tag — do NOT pass loaded_expr directly to from_tagged
 tags = loaded_expr.ls.get_tags()
 bsl_tag = [t for t in tags if hasattr(t, "tag") and t.tag == "bsl"][0]
 recovered_model = from_tagged(bsl_tag.to_expr())
+
+# To build a new expression from the recovered model:
+expr = recovered_model.to_tagged()  # this is buildable by xorq build
 ```
 
-**IMPORTANT:** `.query()` returns `SemanticAggregate`. To make it buildable, either:
-- Use it directly as `expr = query_result` (works in most cases)
-- Or call `expr = query_result.to_tagged()` if build fails
+**IMPORTANT:** `.query()` returns `SemanticAggregate`, which is NOT directly buildable by `xorq build`. You MUST call `.to_tagged()` on the recovered model to get a buildable expression:
+
+```python
+expr = recovered_model.to_tagged()  # buildable — use this
+# NOT: expr = recovered_model.query(...)  # SemanticAggregate — xorq build will fail
+```
+
+If you want to query with specific dimensions/measures AND make it buildable, query first then tag:
+
+```python
+queried = recovered_model.query(dimensions=["region"], measures=["avg_amount"])
+# queried is SemanticAggregate — wrap it for build:
+expr = queried.to_tagged() if hasattr(queried, 'to_tagged') else recovered_model.to_tagged()
+```
 
 - The expression is tagged with `"bsl"` containing SemanticModel metadata
 - `entry.expr.ls.builder` recovers the `SemanticTableOp` for requerying (when not wrapped by CatalogSource)
@@ -260,6 +268,7 @@ This avoids needing to re-register in every script.
 
 ## Tips
 
+- **Build hash collision**: A BSL or ML expression built from the same source data may produce the same build hash as the source's original build. This overwrites the `builds/<hash>/` directory. Always `catalog add` the builder entry BEFORE rebuilding the source, or use separate build directories (`--builds-dir`).
 - ML pipeline `fit()` is deferred — the actual sklearn fitting happens at `xorq run` time, not at script execution
 - The training source is structurally embedded in the expression graph — `FittedPipeline.from_tag_node()` walks the graph to find it
 - `ExprMetadata.builders` stores extracted metadata so you can inspect pipeline steps without fetching the full archive

@@ -104,7 +104,7 @@ expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
 
 - **Source entry** (`kind=Source`) — bound, has data
 - **Transform entries** (`kind=UnboundExpr`) — partial, awaits input
-- `-c "code"` — inline Ibis code applied to `source` variable
+- `-c "code"` — inline Ibis code applied to `source` variable (**single expression only**, no imports/assignments; for complex logic use a build script)
 - `--dry-run` — preview schema without cataloging
 - `--rename-params entry,old,new` — resolve parameter name collisions
 
@@ -117,7 +117,8 @@ expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
 - **sklearn dependency**: sklearn is NOT bundled — add `scikit-learn` to project dependencies
 - **ibis import**: Use `from xorq.vendor import ibis` — NOT `import ibis` directly. Standalone ibis is not installed.
 - **Reading data in build scripts**: Use `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` — these work directly. `xo.read_csv()` does NOT exist.
-- **compose only works with unbound_expr transforms**: You cannot compose two Source entries. To join sources, use `-c` inline code or write a build script
+- **compose only works with unbound_expr transforms**: You cannot compose two Source entries. To join sources, write a build script that loads both via `Catalog.from_default().load()`
+- **`--no-sync` is only for `catalog add`**: Do NOT use `--no-sync` with `catalog compose` — it doesn't support that flag
 - **Custom TagHandler per-process**: `register_tag_handler()` must be called in every Python process that needs it (including build scripts)
 - **Custom TagHandler hashability**: `extract_metadata` return values must be hashable — use `tuple` not `list`
 - **BSL catalog recovery**: `entry.expr.ls.builder` may fail on catalog-loaded BSL entries due to CatalogSource wrapping — walk the expression graph to find the inner BSL tag node
