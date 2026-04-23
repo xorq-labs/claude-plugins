@@ -85,10 +85,9 @@ def check_virtual_env(project_dir: str) -> str | None:
         return (
             f"VIRTUAL_ENV is set to {current} but the project venv is {project_venv}.\n"
             "This causes uv and xorq CLI to target the wrong environment.\n"
-            "ALWAYS prefix uv and xorq commands with `unset VIRTUAL_ENV;`:\n"
-            "  unset VIRTUAL_ENV; uv run xorq build script.py\n"
-            "  unset VIRTUAL_ENV; uv run xorq catalog list\n"
-            "  unset VIRTUAL_ENV; uv sync --python 3.12"
+            "Fix it now by running:\n"
+            f'  export VIRTUAL_ENV="{project_venv}"\n'
+            "Then proceed with xorq commands normally."
         )
     return None
 
