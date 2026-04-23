@@ -31,7 +31,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 
 # Load training data — use ABSOLUTE paths
-train = xo.read_csv("/absolute/path/to/train.csv")
+con = xo.connect()
+train = con.read_csv("/absolute/path/to/train.csv")
 
 # Create and fit pipeline
 sk_pipe = make_pipeline(StandardScaler(), LogisticRegression())
@@ -87,17 +88,25 @@ Write a script that loads from catalog, recovers the pipeline, and predicts on n
 
 ```python
 import xorq.api as xo
+from xorq.catalog.catalog import Catalog
 
-catalog = xo.catalog("<catalog-name>")
-entry = catalog["<model-name>"]
+cat = Catalog.from_default()
+ml_expr = cat.load("<model-name>")  # NOT catalog["name"] — use .load()
 
 # Recover the FittedPipeline domain object
-fitted_pipeline = entry.expr.ls.builder
+fitted_pipeline = ml_expr.ls.builder
 
 # Predict on new data
-new_data = xo.read_csv("test.csv")
+con = xo.connect()
+new_data = con.read_csv("/absolute/path/to/test.csv")
 predictions = fitted_pipeline.predict(new_data)
+expr = predictions  # this is what xorq build captures
 ```
+
+**IMPORTANT API notes:**
+- `xo.catalog()` is a MODULE, not callable — use `from xorq.catalog.catalog import Catalog; Catalog.from_default()`
+- Use `cat.load("alias")` — NOT `cat["alias"]` (no subscript support)
+- Use `xo.connect().read_csv()` — NOT `xo.read_csv()` (doesn't exist)
 
 ## BSL (Boring Semantic Layer)
 
@@ -110,7 +119,8 @@ import xorq.api as xo
 from boring_semantic_layer import SemanticModel, Dimension, Measure
 
 # Source data
-source = xo.read_csv("/absolute/path/to/data.csv")
+con = xo.connect()
+source = con.read_csv("/absolute/path/to/data.csv")
 
 # Define semantic model
 model = SemanticModel(
@@ -140,12 +150,11 @@ expr = semantic_op.query(
 
 ```python
 import xorq.api as xo
-from xorq.vendor.ibis.expr.operations.relations import Tag
-from xorq.vendor.ibis.common.graph import Node
+from xorq.expr.relations import Tag
+from xorq.catalog.catalog import Catalog
 
-catalog = xo.catalog()
-entry = catalog["my_bsl_entry"]
-loaded_expr = entry.expr
+cat = Catalog.from_default()
+loaded_expr = cat.load("my_bsl_entry")
 
 # Walk the expression graph to find the BSL tag node
 def find_bsl_tag(expr):
@@ -195,7 +204,8 @@ register_tag_handler(TagHandler(
 ))
 
 # Tag an expression
-source = xo.read_csv("/absolute/path/to/data.csv")
+con = xo.connect()
+source = con.read_csv("/absolute/path/to/data.csv")
 tagged_expr = source.tag({"my_custom_tag": {"key": "value", "description": "my custom metadata"}})
 expr = tagged_expr  # this is what xorq build captures
 ```
@@ -214,7 +224,8 @@ register_tag_handler(TagHandler(
     from_tag_node=lambda tn: tn.tag.get("my_custom_tag", {}),
 ))
 
-source = xo.read_csv("/path/to/data.csv")
+con = xo.connect()
+source = con.read_csv("/path/to/data.csv")
 expr = source.tag({"my_custom_tag": {"transform": "filter_positive"}})
 ```
 
@@ -222,6 +233,7 @@ expr = source.tag({"my_custom_tag": {"transform": "filter_positive"}})
 ```python
 import xorq.api as xo
 from xorq.expr.builders import register_tag_handler, TagHandler
+from xorq.catalog.catalog import Catalog
 
 # MUST re-register handler in this process too
 register_tag_handler(TagHandler(
@@ -230,12 +242,13 @@ register_tag_handler(TagHandler(
     from_tag_node=lambda tn: tn.tag.get("my_custom_tag", {}),
 ))
 
-catalog = xo.catalog()
-entry = catalog["my_tagged_entry"]
-builder = entry.expr.ls.builder  # dispatches to from_tag_node
+cat = Catalog.from_default()
+loaded_expr = cat.load("my_tagged_entry")
+builder = loaded_expr.ls.builder  # dispatches to from_tag_node
 
 # Use recovered metadata to create a new expression
-new_data = xo.read_csv("/path/to/new_data.csv")
+con = xo.connect()
+new_data = con.read_csv("/path/to/new_data.csv")
 expr = new_data.tag({"my_custom_tag": {**builder, "derived": True}})
 ```
 

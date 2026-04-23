@@ -11,12 +11,14 @@ Expressions are **lazy, immutable DAGs** — they describe computation without e
 import xorq.api as xo
 from xorq.api import _
 
-expr = xo.read_csv("data.csv")
+con = xo.connect()  # default DuckDB backend
+expr = con.read_csv("data.csv")
 expr = expr.filter(_.amount > 100).select("id", "amount", "category")
 ```
 
-- `xo.read_csv()` / `xo.read_parquet()` — lazy reads via default DuckDB backend
-- `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` — for non-default backends
+- `con = xo.connect()` then `con.read_csv()` / `con.read_parquet()` — lazy reads via default DuckDB backend
+- **NOTE:** `xo.read_csv()` does NOT exist — you must use `xo.connect().read_csv()`
+- `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` — for non-default backends (these DO work directly)
 - `xo.connect()` — explicit backend connection
 - Transforms: `.filter()`, `.select()`, `.mutate()`, `.group_by().agg()`, `.join()`, `.order_by()`, `.limit()`
 - The `_` column selector: `from xorq.api import _` enables `_.col_name` syntax
@@ -32,13 +34,23 @@ Catalogs are **git-backed registries** of versioned expressions. Each entry is a
 - Aliases are human-readable symlinks to content-addressed entries
 - Git-annex stores large archives; metadata always in git
 
+**Python catalog API:**
+```python
+from xorq.catalog.catalog import Catalog
+
+cat = Catalog.from_default()        # load default catalog
+entry = cat.load("alias_name")      # load expression by alias — returns an ibis expression
+# NOTE: cat["name"] does NOT work — use cat.load("name")
+# NOTE: xo.catalog() is a MODULE, not callable — use Catalog.from_default()
+```
+
 ## ExprKind Taxonomy
 
 Every catalog entry has a `kind` determined by its outermost structural layer:
 
 | Kind | Description | How it's created |
 |------|-------------|-----------------|
-| `Source` | Bound source with data (table/memtable) | `xo.read_csv()`, `xo.read_parquet()` |
+| `Source` | Bound source with data (table/memtable) | `xo.connect().read_csv()`, `xo.connect().read_parquet()` |
 | `Expr` | Bound transformation | Source + transforms (filter, join, etc.) |
 | `UnboundExpr` | Partial — contains UnboundTable, awaits input | Transform without a bound source |
 | `Composed` | From catalog composition | `xorq catalog compose` |
@@ -68,10 +80,14 @@ register_tag_handler(TagHandler(
 ## ML Pipeline Pattern
 
 ```python
+import xorq.api as xo
 from xorq.expr.ml.pipeline_lib import Pipeline
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
+
+con = xo.connect()
+train_expr = con.read_csv("/path/to/train.csv")
 
 sk_pipe = make_pipeline(StandardScaler(), LogisticRegression())
 pipeline = Pipeline.from_instance(sk_pipe)

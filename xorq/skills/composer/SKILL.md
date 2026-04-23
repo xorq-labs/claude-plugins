@@ -46,7 +46,8 @@ The transform's `schema_in` (input parameters) must be satisfiable by the source
 ```bash
 xorq catalog compose <source1> -c "
 import xorq.api as xo
-other = xo.read_csv('path/to/other.csv')
+con = xo.connect()
+other = con.read_csv('path/to/other.csv')
 source.join(other, 'join_key').select('col1', 'col2', 'col3')
 " -a <alias>
 ```
