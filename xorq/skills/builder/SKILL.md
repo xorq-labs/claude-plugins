@@ -159,15 +159,20 @@ new_query = recovered_model.query(dimensions=["region"], measures=["avg_amount"]
 expr = new_query  # or recovered_model.to_tagged() for the full model
 ```
 
-**If `from_tagged` fails** with `ValueError: No BSL metadata found` (CatalogSource wrapping), walk the graph:
+**If `from_tagged` fails** (CatalogSource/HashingTag wrapping), use `.ls.get_tags()`:
 
 ```python
-from xorq.expr.relations import Tag
+# Find the BSL tag inside the wrapped expression
+tags = loaded_expr.ls.get_tags()
+bsl_tags = [t for t in tags if t.op().tag == "bsl"]
+if bsl_tags:
+    recovered_model = from_tagged(bsl_tags[0])
+```
 
-for node in loaded_expr.op().find(Tag):
-    if "bsl" in str(node.tag or ""):
-        recovered_model = from_tagged(node.to_expr())
-        break
+**IMPORTANT:** `model.query()` returns a `SemanticAggregate` which `xorq build` may reject. Call `.to_tagged()` on the result:
+```python
+queried = recovered_model.query(dimensions=["region"], measures=["avg_amount"])
+expr = queried.to_tagged()  # or just: expr = queried (if it's already a Table)
 ```
 
 - The expression is tagged with `"bsl"` containing SemanticModel metadata
