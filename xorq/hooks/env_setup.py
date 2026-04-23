@@ -77,6 +77,21 @@ def check_venv(project_dir: str) -> str | None:
     return None
 
 
+def check_virtual_env(project_dir: str) -> str | None:
+    """Warn if VIRTUAL_ENV points somewhere other than the project's .venv."""
+    current = os.environ.get("VIRTUAL_ENV")
+    project_venv = os.path.join(project_dir, ".venv")
+    if current and os.path.isdir(project_venv) and os.path.realpath(current) != os.path.realpath(project_venv):
+        return (
+            f"VIRTUAL_ENV is set to {current} but the project venv is {project_venv}.\n"
+            "This causes uv and xorq CLI to target the wrong environment.\n"
+            "Fix it before running xorq commands:\n"
+            f'  export VIRTUAL_ENV="{project_venv}"\n'
+            f'  export PATH="{project_venv}/bin:$PATH"'
+        )
+    return None
+
+
 def check_deps(project_dir: str) -> str | None:
     venv = os.path.join(project_dir, ".venv")
     python = os.path.join(venv, "bin", "python3")
@@ -126,6 +141,7 @@ def main() -> int:
         check_uv,
         lambda: check_pyproject(project_dir),
         lambda: check_venv(project_dir),
+        lambda: check_virtual_env(project_dir),
         lambda: check_deps(project_dir),
     ]
 
