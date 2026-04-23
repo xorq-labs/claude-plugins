@@ -37,8 +37,7 @@ Create a small Python script that reads the data file. The script must define an
 ```python
 import xorq.api as xo
 
-con = xo.connect()  # default DuckDB backend
-expr = con.read_csv("/absolute/path/to/data.csv")
+expr = xo.deferred_read_csv("/absolute/path/to/data.csv")
 ```
 
 **For Parquet files:**
@@ -46,11 +45,8 @@ expr = con.read_csv("/absolute/path/to/data.csv")
 ```python
 import xorq.api as xo
 
-con = xo.connect()
-expr = con.read_parquet("/absolute/path/to/data.parquet")
+expr = xo.deferred_read_parquet("/absolute/path/to/data.parquet")
 ```
-
-**IMPORTANT:** `xo.read_csv()` does NOT exist — always use `xo.connect().read_csv()`. Use absolute paths.
 
 **With transforms (optional):**
 
@@ -58,19 +54,11 @@ expr = con.read_parquet("/absolute/path/to/data.parquet")
 import xorq.api as xo
 from xorq.api import _
 
-con = xo.connect()
-expr = con.read_csv("/absolute/path/to/data.csv")
+expr = xo.deferred_read_csv("/absolute/path/to/data.csv")
 expr = expr.filter(_.amount > 0).select("id", "amount", "category")
 ```
 
-**For non-default backends** (e.g., reading into Postgres instead of DuckDB):
-
-```python
-import xorq.api as xo
-
-expr = xo.deferred_read_csv("/absolute/path/to/data.csv")
-# or xo.deferred_read_parquet("/absolute/path/to/data.parquet")
-```
+Use absolute paths for data files.
 
 ### 3. Build the script
 

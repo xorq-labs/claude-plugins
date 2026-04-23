@@ -98,7 +98,7 @@
             "type": "domain",
             "enforcement": "suggest",
             "priority": "high",
-            "description": "Compose catalog entries into new aliased expressions via CLI",
+            "description": "Compose, run, and build data expressions — xorq catalog run, compose, build, run",
             "promptTriggers": {
                 "keywords": [
                     "compose",
@@ -110,13 +110,27 @@
                     "chain transforms",
                     "apply transform",
                     "inline code",
-                    "dry-run"
+                    "dry-run",
+                    "xorq build",
+                    "xorq run",
+                    "run expression",
+                    "build expression",
+                    "run script",
+                    "build script",
+                    "run-cached",
+                    "execute expression",
+                    "run catalog entry",
+                    "preview results"
                 ],
                 "intentPatterns": [
                     "(compose|chain|combine|assemble).*?(catalog|entries|expressions|transforms)",
                     "xorq\\s+catalog\\s+(compose|run)",
                     "(apply|pipe).*?transform.*?(entry|catalog|source)",
-                    "(source|entry).*?(\\+|plus|with).*?(transform|code|filter)"
+                    "(source|entry).*?(\\+|plus|with).*?(transform|code|filter)",
+                    "(build|run|execute).*?(expression|script|entry)",
+                    "xorq\\s+(build|run|run-cached)",
+                    "(preview|sample|test).*?(results|output|data)",
+                    "(cache|cached).*?(run|execution|results)"
                 ]
             }
         },
@@ -191,32 +205,6 @@
                     "(what|which).*?(entries|aliases|expressions).*?(exist|available|catalog)",
                     "(schema|columns|fields).*?(entry|alias|catalog)",
                     "(check|verify|validate).*?catalog"
-                ]
-            }
-        },
-        "xorq:run-expression": {
-            "type": "domain",
-            "enforcement": "suggest",
-            "priority": "medium",
-            "description": "Build scripts and run data expressions — xorq build, xorq run, xorq run-cached",
-            "promptTriggers": {
-                "keywords": [
-                    "xorq build",
-                    "xorq run",
-                    "run expression",
-                    "build expression",
-                    "run script",
-                    "build script",
-                    "run-cached",
-                    "execute expression",
-                    "run catalog entry",
-                    "preview results"
-                ],
-                "intentPatterns": [
-                    "(build|run|execute).*?(expression|script|entry)",
-                    "xorq\\s+(build|run|run-cached)",
-                    "(preview|sample|test).*?(results|output|data)",
-                    "(cache|cached).*?(run|execution|results)"
                 ]
             }
         }

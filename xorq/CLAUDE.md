@@ -11,15 +11,12 @@ Expressions are **lazy, immutable DAGs** — they describe computation without e
 import xorq.api as xo
 from xorq.api import _
 
-con = xo.connect()  # default DuckDB backend
-expr = con.read_csv("data.csv")
+expr = xo.deferred_read_csv("data.csv")
 expr = expr.filter(_.amount > 100).select("id", "amount", "category")
 ```
 
-- `con = xo.connect()` then `con.read_csv()` / `con.read_parquet()` — lazy reads via default DuckDB backend
-- **NOTE:** `xo.read_csv()` does NOT exist — you must use `xo.connect().read_csv()`
-- `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` — for non-default backends (these DO work directly)
-- `xo.connect()` — explicit backend connection
+- `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` — deferred reads (preferred for build scripts)
+- `xo.connect()` then `con.read_csv()` / `con.read_parquet()` — eager reads via default DuckDB backend
 - Transforms: `.filter()`, `.select()`, `.mutate()`, `.group_by().agg()`, `.join()`, `.order_by()`, `.limit()`
 - The `_` column selector: `from xorq.api import _` enables `_.col_name` syntax
 
@@ -117,6 +114,7 @@ expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
 - **ML Pipeline API**: Use `Pipeline.from_instance(sk_pipe).fit(train, features=[...], target="...").predict(train)`. Do NOT use `deferred_fit_predict` — it returns a non-buildable object
 - **sklearn dependency**: sklearn is NOT bundled — add `scikit-learn` to project dependencies
 - **ibis import**: Use `from xorq.vendor import ibis` — NOT `import ibis` directly. Standalone ibis is not installed.
+- **Reading data in build scripts**: Use `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` — these work directly. `xo.read_csv()` does NOT exist.
 - **compose only works with unbound_expr transforms**: You cannot compose two Source entries. To join sources, use `-c` inline code or write a build script
 - **Custom TagHandler per-process**: `register_tag_handler()` must be called in every Python process that needs it (including build scripts)
 - **Custom TagHandler hashability**: `extract_metadata` return values must be hashable — use `tuple` not `list`
