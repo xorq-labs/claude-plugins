@@ -19,7 +19,7 @@ expr = expr.filter(_.amount > 100).select("id", "amount", "category")
 - `xo.connect()` then `con.read_csv()` / `con.read_parquet()` — eager reads via default DuckDB backend
 - Transforms: `.filter()`, `.select()`, `.mutate()`, `.group_by().agg()`, `.join()`, `.order_by()`, `.limit()`
 - `xo.cases((cond, value), ..., else_=default)` — multi-branch `CASE` expressions
-- `xo.Pipeline` — ML pipeline class (see ML Pipeline Pattern below)
+- `from xorq.expr.ml.pipeline_lib import Pipeline` — ML pipeline class (see ML Pipeline Pattern below)
 - The `_` column selector: `from xorq.api import _` enables `_.col_name` syntax
 
 ### Builds
@@ -39,6 +39,11 @@ from xorq.catalog.catalog import Catalog
 
 cat = Catalog.from_default()        # load default catalog
 entry = cat.load("alias_name")      # load expression by alias — returns an ibis expression
+# To join multiple entries, load into a shared connection:
+con = xo.connect()
+t1 = cat.load("entry1", con=con)
+t2 = cat.load("entry2", con=con)
+joined = t1.join(t2, "key_col")
 # NOTE: cat["name"] does NOT work — use cat.load("name")
 # NOTE: xo.catalog() is a MODULE, not callable — use Catalog.from_default()
 ```
@@ -80,7 +85,7 @@ register_tag_handler(TagHandler(
 
 ```python
 import xorq.api as xo
-from xorq.api import _
+from xorq.expr.ml.pipeline_lib import Pipeline
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
@@ -88,10 +93,12 @@ from sklearn.linear_model import LogisticRegression
 train_expr = xo.deferred_read_csv("/path/to/train.csv")
 
 sk_pipe = make_pipeline(StandardScaler(), LogisticRegression())
-pipeline = xo.Pipeline.from_instance(sk_pipe)
+pipeline = Pipeline.from_instance(sk_pipe)
 fitted = pipeline.fit(train_expr, features=["col1", "col2"], target="label")
 expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
 ```
+
+**NOTE:** Do NOT use `xo.Pipeline` — it fails inside `xorq build` ([#1864](https://github.com/xorq-labs/xorq/issues/1864)).
 
 - `Pipeline.fit()` is **deferred** — builds expression graph, doesn't execute sklearn
 - `.predict()`, `.transform()`, `.predict_proba()` produce tagged expressions
@@ -112,12 +119,12 @@ expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
 
 - **VIRTUAL_ENV mismatch**: If you see `VIRTUAL_ENV=... does not match the project environment path .venv`, use `uv run --active` for all uv/xorq commands — e.g. `uv run --active xorq build script.py`
 - **pyproject.toml flat-layout error**: If `xorq catalog add` fails with `Multiple top-level packages discovered in a flat-layout`, add `[tool.setuptools]\npy-modules = []` to pyproject.toml
-- **ML Pipeline import**: `xo.Pipeline` is available directly via the API. Alternatively: `from xorq.expr.ml.pipeline_lib import Pipeline`
+- **ML Pipeline import**: Use `from xorq.expr.ml.pipeline_lib import Pipeline` in build scripts. `xo.Pipeline` works in interactive Python but **fails inside `xorq build`** ([#1864](https://github.com/xorq-labs/xorq/issues/1864))
 - **ML Pipeline API**: Use `Pipeline.from_instance(sk_pipe).fit(train, features=[...], target="...").predict(train)`. Do NOT use `deferred_fit_predict` — it returns a non-buildable object
 - **sklearn dependency**: sklearn is NOT bundled — add `scikit-learn` to project dependencies
 - **ibis import**: Use `from xorq.vendor import ibis` — NOT `import ibis` directly. Standalone ibis is not installed.
 - **Reading data in build scripts**: Use `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` — these work directly. `xo.read_csv()` does NOT exist.
-- **compose only works with unbound_expr transforms**: You cannot compose two Source entries. To join sources, write a build script that loads both via `Catalog.from_default().load()`
+- **compose only works with unbound_expr transforms**: You cannot compose two Source entries. To join sources, write a build script that loads both via `cat.load("name", con=xo.connect())` into a shared connection
 - **`--no-sync` is only for `catalog add`**: Do NOT use `--no-sync` with `catalog compose` — it doesn't support that flag
 - **Custom TagHandler per-process**: `register_tag_handler()` must be called in every Python process that needs it (including build scripts)
 - **Custom TagHandler hashability**: `extract_metadata` return values must be hashable — use `tuple` not `list`

@@ -52,9 +52,10 @@ Inline `-c` code must be a **single expression** (no imports, no assignments). F
 import xorq.api as xo
 from xorq.catalog.catalog import Catalog
 
+con = xo.connect()  # shared connection — required for joins
 cat = Catalog.from_default()
-source1 = cat.load("entry1")
-source2 = cat.load("entry2")
+source1 = cat.load("entry1", con=con)
+source2 = cat.load("entry2", con=con)
 
 expr = source1.join(source2, "join_key").select("col1", "col2", "col3")
 ```
