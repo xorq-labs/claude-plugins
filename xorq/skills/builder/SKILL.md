@@ -46,6 +46,7 @@ expr = fitted.predict(train)
 - `from xorq.expr.ml.pipeline_lib import Pipeline` — this is the correct import
 - Do NOT use `xo.Pipeline` — it does not exist on the xo.api module
 - Do NOT use `from xorq.vendor import ibis` and then `ibis.Pipeline` — Pipeline is not part of ibis
+- Do NOT use `deferred_fit_predict` — it returns a `DeferredFitOther` which is NOT a buildable expression and causes hashing errors. Always use `Pipeline.from_instance(sk_pipe).fit(train, ...).predict(train)` pattern.
 
 **Key points:**
 - `Pipeline.fit()` is **deferred** — it builds an expression graph, it does not execute sklearn immediately
@@ -261,6 +262,7 @@ This avoids needing to re-register in every script.
 - At least one of `extract_metadata` or `from_tag_node` must be provided
 - `tag_names` is a tuple of string tag names the handler responds to
 - Builtin tag names (`bsl`, ML pipeline tags) cannot be overridden without `override=True`
+- **`extract_metadata` must return hashable types** — use `tuple` instead of `list` in returned dicts, because values get wrapped in `FrozenOrderedDict`
 
 ## Tips
 

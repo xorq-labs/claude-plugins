@@ -98,9 +98,12 @@ expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
 
 - **pyproject.toml flat-layout error**: If `xorq catalog add` fails with `Multiple top-level packages discovered in a flat-layout`, add `[tool.setuptools]\npy-modules = []` to pyproject.toml
 - **ML Pipeline import**: Use `from xorq.expr.ml.pipeline_lib import Pipeline` — NOT `xo.Pipeline`
+- **ML Pipeline API**: Use `Pipeline.from_instance(sk_pipe).fit(train, features=[...], target="...").predict(train)`. Do NOT use `deferred_fit_predict` — it returns a non-buildable object
 - **sklearn dependency**: sklearn is NOT bundled — add `scikit-learn` to project dependencies
+- **ibis import**: Use `from xorq.vendor import ibis` — NOT `import ibis` directly. Standalone ibis is not installed.
 - **compose only works with unbound_expr transforms**: You cannot compose two Source entries. To join sources, use `-c` inline code or write a build script
 - **Custom TagHandler per-process**: `register_tag_handler()` must be called in every Python process that needs it (including build scripts)
+- **Custom TagHandler hashability**: `extract_metadata` return values must be hashable — use `tuple` not `list`
 - **BSL catalog recovery**: `entry.expr.ls.builder` may fail on catalog-loaded BSL entries due to CatalogSource wrapping — walk the expression graph to find the inner BSL tag node
 
 ## CLI Quick Reference
