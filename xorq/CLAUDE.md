@@ -18,6 +18,8 @@ expr = expr.filter(_.amount > 100).select("id", "amount", "category")
 - `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` — deferred reads (preferred for build scripts)
 - `xo.connect()` then `con.read_csv()` / `con.read_parquet()` — eager reads via default DuckDB backend
 - Transforms: `.filter()`, `.select()`, `.mutate()`, `.group_by().agg()`, `.join()`, `.order_by()`, `.limit()`
+- `xo.cases((cond, value), ..., else_=default)` — multi-branch `CASE` expressions
+- `xo.Pipeline` — ML pipeline class (see ML Pipeline Pattern below)
 - The `_` column selector: `from xorq.api import _` enables `_.col_name` syntax
 
 ### Builds
@@ -78,7 +80,7 @@ register_tag_handler(TagHandler(
 
 ```python
 import xorq.api as xo
-from xorq.expr.ml.pipeline_lib import Pipeline
+from xorq.api import _
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
@@ -86,7 +88,7 @@ from sklearn.linear_model import LogisticRegression
 train_expr = xo.deferred_read_csv("/path/to/train.csv")
 
 sk_pipe = make_pipeline(StandardScaler(), LogisticRegression())
-pipeline = Pipeline.from_instance(sk_pipe)
+pipeline = xo.Pipeline.from_instance(sk_pipe)
 fitted = pipeline.fit(train_expr, features=["col1", "col2"], target="label")
 expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
 ```
@@ -109,7 +111,7 @@ expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
 ## Common Pitfalls
 
 - **pyproject.toml flat-layout error**: If `xorq catalog add` fails with `Multiple top-level packages discovered in a flat-layout`, add `[tool.setuptools]\npy-modules = []` to pyproject.toml
-- **ML Pipeline import**: Use `from xorq.expr.ml.pipeline_lib import Pipeline` — NOT `xo.Pipeline`
+- **ML Pipeline import**: `xo.Pipeline` is available directly via the API. Alternatively: `from xorq.expr.ml.pipeline_lib import Pipeline`
 - **ML Pipeline API**: Use `Pipeline.from_instance(sk_pipe).fit(train, features=[...], target="...").predict(train)`. Do NOT use `deferred_fit_predict` — it returns a non-buildable object
 - **sklearn dependency**: sklearn is NOT bundled — add `scikit-learn` to project dependencies
 - **ibis import**: Use `from xorq.vendor import ibis` — NOT `import ibis` directly. Standalone ibis is not installed.
