@@ -25,7 +25,6 @@ Create a Python script that fits a pipeline and produces a tagged expression:
 
 ```python
 import xorq.api as xo
-from xorq.expr.ml.pipeline_lib import Pipeline
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
@@ -35,18 +34,16 @@ train = xo.deferred_read_csv("/absolute/path/to/train.csv")
 
 # Create and fit pipeline
 sk_pipe = make_pipeline(StandardScaler(), LogisticRegression())
-pipeline = Pipeline.from_instance(sk_pipe)
+pipeline = xo.Pipeline.from_instance(sk_pipe)
 fitted = pipeline.fit(train, features=["feature1", "feature2"], target="label")
 
 # Produce tagged prediction expression
 expr = fitted.predict(train)
 ```
 
-**IMPORTANT — correct imports:**
-- `from xorq.expr.ml.pipeline_lib import Pipeline` — this is the correct import
-- Do NOT use `xo.Pipeline` — it does not exist on the xo.api module
-- Do NOT use `from xorq.vendor import ibis` and then `ibis.Pipeline` — Pipeline is not part of ibis
-- Do NOT use `deferred_fit_predict` — it returns a `DeferredFitOther` which is NOT a buildable expression and causes hashing errors. Always use `Pipeline.from_instance(sk_pipe).fit(train, ...).predict(train)` pattern.
+**IMPORTANT — correct API usage:**
+- `xo.Pipeline` is available directly from `import xorq.api as xo`
+- Do NOT use `deferred_fit_predict` — it returns a `DeferredFitOther` which is NOT a buildable expression and causes hashing errors. Always use `xo.Pipeline.from_instance(sk_pipe).fit(train, ...).predict(train)` pattern.
 
 **Key points:**
 - `Pipeline.fit()` is **deferred** — it builds an expression graph, it does not execute sklearn immediately
