@@ -114,62 +114,60 @@ BSL entries wrap expressions with semantic model metadata (dimensions, measures,
 
 ### Creating a BSL expression
 
+**API (verified):** `SemanticModel(table=expr, dimensions={name: Dimension(expr=lambda t: t.col)}, measures={name: Measure(expr=lambda t: t.col.sum())})`
+
 ```python
 import xorq.api as xo
 from boring_semantic_layer import SemanticModel, Dimension, Measure
 
-# Source data
 con = xo.connect()
 source = con.read_csv("/absolute/path/to/data.csv")
 
-# Define semantic model
+# Dimensions and measures are DICTS (not lists), values use lambda expr
 model = SemanticModel(
-    name="my_model",
     table=source,
-    dimensions=[
-        Dimension(name="category", description="Product category"),
-        Dimension(name="region", description="Sales region"),
-    ],
-    measures=[
-        Measure(name="total_amount", expr="sum(amount)", description="Total sales"),
-        Measure(name="avg_amount", expr="mean(amount)", description="Average sale"),
-    ],
+    name="my_model",
+    dimensions={
+        "category": Dimension(expr=lambda t: t.category),
+        "region": Dimension(expr=lambda t: t.region),
+    },
+    measures={
+        "total_amount": Measure(expr=lambda t: t.amount.sum()),
+        "avg_amount": Measure(expr=lambda t: t.amount.mean()),
+    },
 )
 
-# Query the model — this produces a tagged expression
-semantic_op = model.semantic_table_op()
-expr = semantic_op.query(
-    dimensions=["category"],
-    measures=["total_amount"],
-)
+# to_tagged() produces the buildable expression for xorq build
+expr = model.to_tagged()
+
+# Or query first then use to_tagged on the model:
+# queried = model.query(dimensions=["category"], measures=["total_amount"])
 ```
 
 ### Recovery from catalog
 
-**IMPORTANT:** When loading BSL expressions from catalog, `entry.expr.ls.builder` may fail with `ValueError: No BSL metadata found` because the catalog wraps the expression with a `CatalogSource` tag. Use this workaround:
-
 ```python
-import xorq.api as xo
-from xorq.expr.relations import Tag
+from boring_semantic_layer import from_tagged
 from xorq.catalog.catalog import Catalog
 
 cat = Catalog.from_default()
 loaded_expr = cat.load("my_bsl_entry")
 
-# Walk the expression graph to find the BSL tag node
-def find_bsl_tag(expr):
-    """Walk expression graph to find the inner BSL tag node."""
-    for node in expr.op().find(Tag):
-        if "bsl" in (node.tag or {}):
-            return node
-    return None
+# from_tagged recovers the SemanticModel — can then .query() with new dims
+recovered_model = from_tagged(loaded_expr)
+new_query = recovered_model.query(dimensions=["region"], measures=["avg_amount"])
+expr = new_query  # or recovered_model.to_tagged() for the full model
+```
 
-bsl_tag = find_bsl_tag(loaded_expr)
-if bsl_tag:
-    from boring_semantic_layer import from_tagged
-    recovered = from_tagged(bsl_tag.to_expr())
-    # recovered is a SemanticAggregate — to re-query with different dimensions:
-    # navigate to the base SemanticTableOp
+**If `from_tagged` fails** with `ValueError: No BSL metadata found` (CatalogSource wrapping), walk the graph:
+
+```python
+from xorq.expr.relations import Tag
+
+for node in loaded_expr.op().find(Tag):
+    if "bsl" in str(node.tag or ""):
+        recovered_model = from_tagged(node.to_expr())
+        break
 ```
 
 - The expression is tagged with `"bsl"` containing SemanticModel metadata
@@ -182,32 +180,24 @@ if bsl_tag:
 
 **CRITICAL:** The TagHandler must be registered in EVERY Python process that needs it. Since `xorq build` spawns a subprocess, you must register the handler **inside the build script itself** (not in a separate setup step).
 
+**`.tag()` API (verified):** `expr.tag("tag_name", key=value, key2=value2)` — string tag name + keyword args. NOT a dict.
+
 ```python
 import xorq.api as xo
 from xorq.expr.builders import register_tag_handler, TagHandler
 
-# Define a recovery function
-def recover_my_object(tag_node):
-    """Recover domain object from tag node."""
-    metadata = tag_node.tag.get("my_custom_tag", {})
-    # ... reconstruct your domain object
-    return metadata  # or a domain object
-
 # Register — MUST happen before .ls.builder is called
 register_tag_handler(TagHandler(
     tag_names=("my_custom_tag",),
-    extract_metadata=lambda tag_node: {
-        "type": "my_custom_tag",
-        # ... additional metadata from tag_node.tag["my_custom_tag"]
-    },
-    from_tag_node=recover_my_object,
+    extract_metadata=lambda tag_node: {"type": "my_custom_tag", "column": tag_node.metadata.get("column", "")},
+    from_tag_node=lambda tag_node: dict(tag_node.metadata),
 ))
 
-# Tag an expression
+# Tag an expression — use string tag name + kwargs (NOT a dict!)
 con = xo.connect()
 source = con.read_csv("/absolute/path/to/data.csv")
-tagged_expr = source.tag({"my_custom_tag": {"key": "value", "description": "my custom metadata"}})
-expr = tagged_expr  # this is what xorq build captures
+expr = source.tag("my_custom_tag", column="age", threshold=0.5)
+# tag_node.metadata will be {"tag": "my_custom_tag", "column": "age", "threshold": 0.5}
 ```
 
 ### Complete round-trip example (build + recover)
@@ -217,16 +207,15 @@ expr = tagged_expr  # this is what xorq build captures
 import xorq.api as xo
 from xorq.expr.builders import register_tag_handler, TagHandler
 
-# Register handler
 register_tag_handler(TagHandler(
     tag_names=("my_custom_tag",),
-    extract_metadata=lambda tn: {"type": "my_custom_tag", **tn.tag.get("my_custom_tag", {})},
-    from_tag_node=lambda tn: tn.tag.get("my_custom_tag", {}),
+    extract_metadata=lambda tn: {"type": "my_custom_tag", "column": tn.metadata.get("column", "")},
+    from_tag_node=lambda tn: dict(tn.metadata),
 ))
 
 con = xo.connect()
 source = con.read_csv("/path/to/data.csv")
-expr = source.tag({"my_custom_tag": {"transform": "filter_positive"}})
+expr = source.tag("my_custom_tag", column="age", transform="filter_positive")
 ```
 
 **Script 2: Recover from catalog and create new expression**
@@ -238,18 +227,18 @@ from xorq.catalog.catalog import Catalog
 # MUST re-register handler in this process too
 register_tag_handler(TagHandler(
     tag_names=("my_custom_tag",),
-    extract_metadata=lambda tn: {"type": "my_custom_tag", **tn.tag.get("my_custom_tag", {})},
-    from_tag_node=lambda tn: tn.tag.get("my_custom_tag", {}),
+    extract_metadata=lambda tn: {"type": "my_custom_tag", "column": tn.metadata.get("column", "")},
+    from_tag_node=lambda tn: dict(tn.metadata),
 ))
 
 cat = Catalog.from_default()
 loaded_expr = cat.load("my_tagged_entry")
-builder = loaded_expr.ls.builder  # dispatches to from_tag_node
+builder = loaded_expr.ls.builder  # returns dict from from_tag_node
 
 # Use recovered metadata to create a new expression
 con = xo.connect()
 new_data = con.read_csv("/path/to/new_data.csv")
-expr = new_data.tag({"my_custom_tag": {**builder, "derived": True}})
+expr = new_data.tag("my_custom_tag", **{k: v for k, v in builder.items() if k != "tag"}, derived=True)
 ```
 
 ### Registration via entry point (persistent across processes)
