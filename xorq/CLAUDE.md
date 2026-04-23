@@ -94,6 +94,15 @@ expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
 - `--dry-run` — preview schema without cataloging
 - `--rename-params entry,old,new` — resolve parameter name collisions
 
+## Common Pitfalls
+
+- **pyproject.toml flat-layout error**: If `xorq catalog add` fails with `Multiple top-level packages discovered in a flat-layout`, add `[tool.setuptools]\npy-modules = []` to pyproject.toml
+- **ML Pipeline import**: Use `from xorq.expr.ml.pipeline_lib import Pipeline` — NOT `xo.Pipeline`
+- **sklearn dependency**: sklearn is NOT bundled — add `scikit-learn` to project dependencies
+- **compose only works with unbound_expr transforms**: You cannot compose two Source entries. To join sources, use `-c` inline code or write a build script
+- **Custom TagHandler per-process**: `register_tag_handler()` must be called in every Python process that needs it (including build scripts)
+- **BSL catalog recovery**: `entry.expr.ls.builder` may fail on catalog-loaded BSL entries due to CatalogSource wrapping — walk the expression graph to find the inner BSL tag node
+
 ## CLI Quick Reference
 
 ### Build & Run

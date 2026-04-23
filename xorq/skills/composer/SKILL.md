@@ -39,7 +39,21 @@ The transform's `schema_in` (input parameters) must be satisfiable by the source
 
 ### 3. Compose
 
-**Source + transforms:**
+**IMPORTANT:** Only entries with `kind=UnboundExpr` can be used as transform entries. You CANNOT compose two `Source` entries together (e.g., to join them). To join two sources, use inline code (`-c`) on one source and reference the other via Python:
+
+**Joining two source entries (use inline code):**
+
+```bash
+xorq catalog compose <source1> -c "
+import xorq.api as xo
+other = xo.read_csv('path/to/other.csv')
+source.join(other, 'join_key').select('col1', 'col2', 'col3')
+" -a <alias>
+```
+
+Or write a build script that reads both from the catalog and joins them.
+
+**Source + transforms (unbound_expr only):**
 
 ```bash
 xorq catalog compose <source> <transform1> <transform2> -a <alias>
@@ -47,7 +61,7 @@ xorq catalog compose <source> <transform1> <transform2> -a <alias>
 
 Entries are listed in order: source first, then transforms applied sequentially.
 
-**Source + inline code:**
+**Source + inline code (most flexible):**
 
 ```bash
 xorq catalog compose <source> -c "source.filter(source.amount > 15)" -a <alias>

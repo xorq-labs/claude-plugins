@@ -101,12 +101,44 @@ Inspect the schema:
 xorq catalog schema <alias> --json
 ```
 
+## Batch ingestion
+
+When ingesting multiple files, write one script per file and build/add them sequentially. You can use a loop pattern:
+
+```bash
+for script in ingest_*.py; do
+  hash=$(xorq build "$script" 2>&1 | grep -oP 'builds/\K[a-f0-9]+')
+  xorq catalog add "builds/$hash" --alias "$(basename "$script" .py | sed 's/ingest_//')" --no-sync
+done
+```
+
+Or build all scripts first, then add:
+
+```bash
+xorq build ingest_customers.py
+# note the hash from output, then:
+xorq catalog add builds/<hash> --alias customers --no-sync
+```
+
+## pyproject.toml setup
+
+**IMPORTANT:** If `xorq catalog add` fails with `Multiple top-level packages discovered in a flat-layout`, add this to `pyproject.toml`:
+
+```toml
+[tool.setuptools]
+py-modules = []
+```
+
+This prevents setuptools from auto-discovering data directories as Python packages.
+
 ## Tips
 
 - Use `--no-sync` on `catalog add` if working without a remote: `xorq catalog add builds/<hash> --alias <name> --no-sync`
 - The `expr` variable name is the default. Use `-e <name>` with `xorq build` if the script uses a different variable name.
 - Use `xorq build --debug` to output SQL files for inspection.
 - After adding, the entry kind should be `Source` (visible with `--kind` flag on list).
+- Use **absolute paths** for data files in scripts to avoid path resolution issues.
+- `xorq build` output shows the build hash — capture it for the `catalog add` step.
 
 ## Arguments
 

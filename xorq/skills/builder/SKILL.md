@@ -8,6 +8,15 @@ Guide the user through creating catalog entries with recoverable domain objects 
 
 ## ML Pipelines (FittedPipeline)
 
+### Prerequisites
+
+**sklearn must be installed.** If not already in dependencies, add it:
+
+```bash
+uv add scikit-learn
+# or add "scikit-learn" to pyproject.toml dependencies
+```
+
 ### Workflow
 
 #### 1. Write a training script
@@ -21,8 +30,8 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 
-# Load training data
-train = xo.read_csv("train.csv")
+# Load training data — use ABSOLUTE paths
+train = xo.read_csv("/absolute/path/to/train.csv")
 
 # Create and fit pipeline
 sk_pipe = make_pipeline(StandardScaler(), LogisticRegression())
@@ -33,11 +42,17 @@ fitted = pipeline.fit(train, features=["feature1", "feature2"], target="label")
 expr = fitted.predict(train)
 ```
 
+**IMPORTANT — correct imports:**
+- `from xorq.expr.ml.pipeline_lib import Pipeline` — this is the correct import
+- Do NOT use `xo.Pipeline` — it does not exist on the xo.api module
+- Do NOT use `from xorq.vendor import ibis` and then `ibis.Pipeline` — Pipeline is not part of ibis
+
 **Key points:**
 - `Pipeline.fit()` is **deferred** — it builds an expression graph, it does not execute sklearn immediately
 - `.predict()` tags the expression with `FittedPipelineTagKey.PREDICT`
 - Other response methods: `.transform()`, `.predict_proba()`, `.decision_function()`, `.feature_importances()`
 - The `features` parameter takes a list of column names; `target` is the label column
+- Features must be **numeric columns** — filter out non-numeric columns before fitting
 
 #### 2. Build the script
 
@@ -87,28 +102,143 @@ predictions = fitted_pipeline.predict(new_data)
 
 BSL entries wrap expressions with semantic model metadata (dimensions, measures, descriptions).
 
+### Creating a BSL expression
+
+```python
+import xorq.api as xo
+from boring_semantic_layer import SemanticModel, Dimension, Measure
+
+# Source data
+source = xo.read_csv("/absolute/path/to/data.csv")
+
+# Define semantic model
+model = SemanticModel(
+    name="my_model",
+    table=source,
+    dimensions=[
+        Dimension(name="category", description="Product category"),
+        Dimension(name="region", description="Sales region"),
+    ],
+    measures=[
+        Measure(name="total_amount", expr="sum(amount)", description="Total sales"),
+        Measure(name="avg_amount", expr="mean(amount)", description="Average sale"),
+    ],
+)
+
+# Query the model — this produces a tagged expression
+semantic_op = model.semantic_table_op()
+expr = semantic_op.query(
+    dimensions=["category"],
+    measures=["total_amount"],
+)
+```
+
+### Recovery from catalog
+
+**IMPORTANT:** When loading BSL expressions from catalog, `entry.expr.ls.builder` may fail with `ValueError: No BSL metadata found` because the catalog wraps the expression with a `CatalogSource` tag. Use this workaround:
+
+```python
+import xorq.api as xo
+from xorq.vendor.ibis.expr.operations.relations import Tag
+from xorq.vendor.ibis.common.graph import Node
+
+catalog = xo.catalog()
+entry = catalog["my_bsl_entry"]
+loaded_expr = entry.expr
+
+# Walk the expression graph to find the BSL tag node
+def find_bsl_tag(expr):
+    """Walk expression graph to find the inner BSL tag node."""
+    for node in expr.op().find(Tag):
+        if "bsl" in (node.tag or {}):
+            return node
+    return None
+
+bsl_tag = find_bsl_tag(loaded_expr)
+if bsl_tag:
+    from boring_semantic_layer import from_tagged
+    recovered = from_tagged(bsl_tag.to_expr())
+    # recovered is a SemanticAggregate — to re-query with different dimensions:
+    # navigate to the base SemanticTableOp
+```
+
 - The expression is tagged with `"bsl"` containing SemanticModel metadata
-- `entry.expr.ls.builder` recovers the `SemanticTableOp` for requerying
+- `entry.expr.ls.builder` recovers the `SemanticTableOp` for requerying (when not wrapped by CatalogSource)
 - Catalog kind is `ExprBuilder`
 
 ## Custom TagHandlers
 
 ### Registration via Python
 
+**CRITICAL:** The TagHandler must be registered in EVERY Python process that needs it. Since `xorq build` spawns a subprocess, you must register the handler **inside the build script itself** (not in a separate setup step).
+
 ```python
+import xorq.api as xo
 from xorq.expr.builders import register_tag_handler, TagHandler
 
+# Define a recovery function
+def recover_my_object(tag_node):
+    """Recover domain object from tag node."""
+    metadata = tag_node.tag.get("my_custom_tag", {})
+    # ... reconstruct your domain object
+    return metadata  # or a domain object
+
+# Register — MUST happen before .ls.builder is called
 register_tag_handler(TagHandler(
     tag_names=("my_custom_tag",),
     extract_metadata=lambda tag_node: {
         "type": "my_custom_tag",
-        # ... additional metadata
+        # ... additional metadata from tag_node.tag["my_custom_tag"]
     },
-    from_tag_node=lambda tag_node: recover_my_object(tag_node),
+    from_tag_node=recover_my_object,
 ))
+
+# Tag an expression
+source = xo.read_csv("/absolute/path/to/data.csv")
+tagged_expr = source.tag({"my_custom_tag": {"key": "value", "description": "my custom metadata"}})
+expr = tagged_expr  # this is what xorq build captures
 ```
 
-### Registration via entry point
+### Complete round-trip example (build + recover)
+
+**Script 1: Create and catalog the tagged expression**
+```python
+import xorq.api as xo
+from xorq.expr.builders import register_tag_handler, TagHandler
+
+# Register handler
+register_tag_handler(TagHandler(
+    tag_names=("my_custom_tag",),
+    extract_metadata=lambda tn: {"type": "my_custom_tag", **tn.tag.get("my_custom_tag", {})},
+    from_tag_node=lambda tn: tn.tag.get("my_custom_tag", {}),
+))
+
+source = xo.read_csv("/path/to/data.csv")
+expr = source.tag({"my_custom_tag": {"transform": "filter_positive"}})
+```
+
+**Script 2: Recover from catalog and create new expression**
+```python
+import xorq.api as xo
+from xorq.expr.builders import register_tag_handler, TagHandler
+
+# MUST re-register handler in this process too
+register_tag_handler(TagHandler(
+    tag_names=("my_custom_tag",),
+    extract_metadata=lambda tn: {"type": "my_custom_tag", **tn.tag.get("my_custom_tag", {})},
+    from_tag_node=lambda tn: tn.tag.get("my_custom_tag", {}),
+))
+
+catalog = xo.catalog()
+entry = catalog["my_tagged_entry"]
+builder = entry.expr.ls.builder  # dispatches to from_tag_node
+
+# Use recovered metadata to create a new expression
+new_data = xo.read_csv("/path/to/new_data.csv")
+expr = new_data.tag({"my_custom_tag": {**builder, "derived": True}})
+```
+
+### Registration via entry point (persistent across processes)
 
 In `pyproject.toml`:
 
@@ -116,6 +246,8 @@ In `pyproject.toml`:
 [project.entry-points."xorq.from_tag_node"]
 my_handler = "my_package.handlers:my_tag_handler"
 ```
+
+This avoids needing to re-register in every script.
 
 ### How it works
 
