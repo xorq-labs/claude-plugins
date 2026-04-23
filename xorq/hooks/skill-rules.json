@@ -1,0 +1,224 @@
+{
+    "version": "1.0",
+    "description": "Guardrail and domain rules for the xorq Claude plugin",
+    "skills": {
+        "no-memtable": {
+            "type": "guardrail",
+            "enforcement": "block",
+            "priority": "critical",
+            "description": "Prevent ibis.memtable in build scripts — embeds local paths, breaks portability",
+            "fileTriggers": {
+                "pathPatterns": ["**/*.py"],
+                "pathExclusions": ["**/*test*.py", "**/test_*.py"],
+                "contentPatterns": [
+                    "ibis\\.memtable\\("
+                ]
+            },
+            "blockMessage": "BLOCKED: ibis.memtable() in {file_path}\n\nibis.memtable embeds local filesystem paths, producing builds that break on other machines.\n\nFix: Keep everything deferred.\n  - Use per-column expr.aggregate() for stats\n  - Use .select() with ibis.literal() for constant metadata\n  - Use ibis.union() to combine results\n\nAdd '# @skip-validation' to skip this check.",
+            "skipConditions": {
+                "fileMarkers": ["@skip-validation"],
+                "envOverride": "SKIP_XORQ_GUARDRAILS"
+            }
+        },
+        "no-cases-pattern": {
+            "type": "guardrail",
+            "enforcement": "block",
+            "priority": "critical",
+            "description": "Prevent xo.cases() and ibis.cases() — use xo.case() builder instead",
+            "fileTriggers": {
+                "pathPatterns": ["**/*.py"],
+                "contentPatterns": [
+                    "xo\\.cases\\(",
+                    "ibis\\.cases\\("
+                ]
+            },
+            "blockMessage": "BLOCKED: xo.cases() or ibis.cases() in {file_path}\n\n- xo.cases() does NOT survive BSL serialization (to_tagged -> from_tagged)\n- ibis.cases() causes SignatureValidationError with vendored ibis\n\nFix: Use xo.case() builder pattern:\n  xo.case().when(condition, value).else_(default).end()\n\nExample:\n  xo.case()\n  .when(_.dep_delay > 0, \"Delayed\")\n  .else_(\"On Time\")\n  .end()\n\nAdd '# @skip-validation' to skip this check.",
+            "skipConditions": {
+                "fileMarkers": ["@skip-validation"],
+                "envOverride": "SKIP_XORQ_GUARDRAILS"
+            }
+        },
+        "no-eager-execution": {
+            "type": "guardrail",
+            "enforcement": "block",
+            "priority": "high",
+            "description": "Prevent .execute() and .to_pandas() in build scripts — everything must stay deferred",
+            "fileTriggers": {
+                "pathPatterns": ["**/*.py"],
+                "pathExclusions": ["**/*test*.py", "**/test_*.py", "**/verification*.py"],
+                "contentPatterns": [
+                    "\\.execute\\(\\)",
+                    "\\.to_pandas\\(\\)"
+                ]
+            },
+            "blockMessage": "BLOCKED: .execute() or .to_pandas() in {file_path}\n\nBuild scripts must keep everything deferred.\n\nFix:\n  - Remove .execute() / .to_pandas() calls\n  - Use xorq build / xorq run for execution\n  - Use .cache(ParquetTTLSnapshotCache.from_kwargs()) for intermediate results\n  - Use print(expr.schema()) to inspect schemas\n\nAdd '# @skip-validation' to skip this check.",
+            "skipConditions": {
+                "sessionSkillUsed": true,
+                "fileMarkers": ["@skip-validation"],
+                "envOverride": "SKIP_XORQ_GUARDRAILS"
+            }
+        },
+        "xorq:init": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Ingest CSV/Parquet files into a catalog — create source expressions and register them",
+            "promptTriggers": {
+                "keywords": [
+                    "ingest",
+                    "onboard",
+                    "import csv",
+                    "import parquet",
+                    "load csv",
+                    "load parquet",
+                    "deferred_read_csv",
+                    "deferred_read_parquet",
+                    "catalog init",
+                    "new catalog",
+                    "add to catalog",
+                    "register source",
+                    "source expression"
+                ],
+                "intentPatterns": [
+                    "(ingest|import|load|onboard).*?(csv|parquet|data|file)",
+                    "(create|init|setup|new).*?catalog",
+                    "(add|register).*?(source|entry).*?catalog",
+                    "(read|load).*?(csv|parquet).*?(catalog|xorq)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": ["**/*.csv", "**/*.parquet"],
+                "contentPatterns": [
+                    "deferred_read_csv",
+                    "deferred_read_parquet"
+                ]
+            }
+        },
+        "xorq:composer": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Compose catalog entries into new aliased expressions via CLI",
+            "promptTriggers": {
+                "keywords": [
+                    "compose",
+                    "chain entries",
+                    "combine entries",
+                    "catalog compose",
+                    "catalog run",
+                    "compose entries",
+                    "chain transforms",
+                    "apply transform",
+                    "inline code",
+                    "dry-run"
+                ],
+                "intentPatterns": [
+                    "(compose|chain|combine|assemble).*?(catalog|entries|expressions|transforms)",
+                    "xorq\\s+catalog\\s+(compose|run)",
+                    "(apply|pipe).*?transform.*?(entry|catalog|source)",
+                    "(source|entry).*?(\\+|plus|with).*?(transform|code|filter)"
+                ]
+            }
+        },
+        "xorq:builder": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Create ExprBuilder catalog entries — ML pipelines, BSL, custom TagHandlers",
+            "promptTriggers": {
+                "keywords": [
+                    "sklearn",
+                    "scikit-learn",
+                    "Pipeline.from_instance",
+                    "FittedPipeline",
+                    "ExprBuilder",
+                    "TagHandler",
+                    "register_tag_handler",
+                    "BSL",
+                    "SemanticModel",
+                    "SemanticTableOp",
+                    "ml pipeline",
+                    "machine learning",
+                    "train model",
+                    "fit predict"
+                ],
+                "intentPatterns": [
+                    "(train|fit|build).*?(model|pipeline|classifier|regressor)",
+                    "(sklearn|scikit).*?(pipeline|model)",
+                    "(create|register|add).*?(tag.?handler|builder|BSL|semantic)",
+                    "(ML|machine.?learning).*?(pipeline|expression|catalog)",
+                    "(predict|transform|classify).*?(expression|deferred|catalog)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "**/*pipeline*.py",
+                    "**/*model*.py",
+                    "**/*sklearn*.py",
+                    "**/*builder*.py"
+                ],
+                "contentPatterns": [
+                    "Pipeline\\.from_instance",
+                    "from sklearn",
+                    "register_tag_handler",
+                    "TagHandler\\(",
+                    "SemanticModel",
+                    "from_tag_node"
+                ]
+            }
+        },
+        "xorq:catalog-explore": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "medium",
+            "description": "Discover and inspect catalog entries — list, schema, info, log, check",
+            "promptTriggers": {
+                "keywords": [
+                    "catalog list",
+                    "catalog schema",
+                    "catalog info",
+                    "catalog log",
+                    "catalog check",
+                    "list entries",
+                    "list aliases",
+                    "show catalog",
+                    "inspect entry",
+                    "what entries",
+                    "available entries"
+                ],
+                "intentPatterns": [
+                    "(list|show|inspect|explore|browse).*?(catalog|entries|aliases)",
+                    "(what|which).*?(entries|aliases|expressions).*?(exist|available|catalog)",
+                    "(schema|columns|fields).*?(entry|alias|catalog)",
+                    "(check|verify|validate).*?catalog"
+                ]
+            }
+        },
+        "xorq:run-expression": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "medium",
+            "description": "Build scripts and run data expressions — xorq build, xorq run, xorq run-cached",
+            "promptTriggers": {
+                "keywords": [
+                    "xorq build",
+                    "xorq run",
+                    "run expression",
+                    "build expression",
+                    "run script",
+                    "build script",
+                    "run-cached",
+                    "execute expression",
+                    "run catalog entry",
+                    "preview results"
+                ],
+                "intentPatterns": [
+                    "(build|run|execute).*?(expression|script|entry)",
+                    "xorq\\s+(build|run|run-cached)",
+                    "(preview|sample|test).*?(results|output|data)",
+                    "(cache|cached).*?(run|execution|results)"
+                ]
+            }
+        }
+    }
+}
