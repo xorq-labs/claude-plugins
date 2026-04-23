@@ -84,10 +84,10 @@ def check_virtual_env(project_dir: str) -> str | None:
     if current and os.path.isdir(project_venv) and os.path.realpath(current) != os.path.realpath(project_venv):
         return (
             f"VIRTUAL_ENV is set to {current} but the project venv is {project_venv}.\n"
-            "This causes uv and xorq CLI to target the wrong environment.\n"
-            "Fix it now by running:\n"
-            f'  export VIRTUAL_ENV="{project_venv}"\n'
-            "Then proceed with xorq commands normally."
+            "This causes uv to target the wrong environment.\n"
+            "ALWAYS use the --active flag with uv run:\n"
+            "  uv run --active xorq build script.py\n"
+            "  uv run --active xorq catalog list"
         )
     return None
 
