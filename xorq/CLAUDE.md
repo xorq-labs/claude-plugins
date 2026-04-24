@@ -65,8 +65,8 @@ Every catalog entry has a `kind` determined by its outermost structural layer:
 Expressions can be **tagged** with metadata that enables domain object recovery:
 
 ```python
-# Tag an expression
-tagged_expr = expr.tag({"my_tag": {"key": "value"}})
+# Tag an expression — use string tag name + kwargs (NOT a dict)
+tagged_expr = expr.tag("my_tag", key="value")
 
 # Register a handler for round-trip recovery
 from xorq.expr.builders import register_tag_handler, TagHandler

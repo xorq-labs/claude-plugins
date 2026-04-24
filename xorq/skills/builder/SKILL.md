@@ -256,7 +256,7 @@ This avoids needing to re-register in every script.
 
 ### How it works
 
-1. Tag an expression: `expr.tag({"my_custom_tag": metadata})`
+1. Tag an expression: `expr.tag("my_custom_tag", key=value, ...)` — string name + kwargs (verified signature: `Table.tag(self, tag, **kwargs)`)
 2. Build and add to catalog — entry kind becomes `ExprBuilder`
 3. On load: `entry.expr.ls.builder` → dispatches to registered handler's `from_tag_node()`
 4. `extract_metadata()` stores handler metadata in catalog sidecar YAML (`ExprMetadata.builders`)

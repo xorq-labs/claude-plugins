@@ -96,22 +96,18 @@ xorq catalog schema <alias> --json
 
 ## Batch ingestion
 
-When ingesting multiple files, write one script per file and build/add them sequentially. You can use a loop pattern:
-
-```bash
-for script in ingest_*.py; do
-  hash=$(xorq build "$script" 2>&1 | grep -oP 'builds/\K[a-f0-9]+')
-  xorq catalog add "builds/$hash" --alias "$(basename "$script" .py | sed 's/ingest_//')" --no-sync
-done
-```
-
-Or build all scripts first, then add:
+When ingesting multiple files, write one script per file and build/add each sequentially — run `xorq build`, note the printed build path, then `xorq catalog add` that path with an alias:
 
 ```bash
 xorq build ingest_customers.py
-# note the hash from output, then:
-xorq catalog add builds/<hash> --alias customers --no-sync
+# output prints the build path, e.g. builds/abc123...
+xorq catalog add builds/<hash> --alias customers
+
+xorq build ingest_orders.py
+xorq catalog add builds/<hash> --alias orders
 ```
+
+Add `--no-sync` to `catalog add` if you want to defer pushing to the remote until the batch is complete.
 
 ## pyproject.toml setup
 
