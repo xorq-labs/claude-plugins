@@ -62,58 +62,17 @@ Every catalog entry has a `kind` determined by its outermost structural layer:
 
 ## TagHandler / Builder Pattern
 
-Expressions can be **tagged** with metadata that enables domain object recovery:
-
-```python
-# Tag an expression — use string tag name + kwargs (NOT a dict)
-tagged_expr = expr.tag("my_tag", key="value")
-
-# Register a handler for round-trip recovery
-from xorq.expr.builders import register_tag_handler, TagHandler
-register_tag_handler(TagHandler(
-    tag_names=("my_tag",),
-    extract_metadata=lambda tag_node: {"type": "my_tag", ...},
-    from_tag_node=lambda tag_node: recover_domain_object(tag_node),
-))
-```
+Expressions can be **tagged** with metadata that enables domain object recovery. Tag syntax: `expr.tag("name", key=value)` — string tag name + kwargs (NOT a dict).
 
 - `expr.ls.builder` triggers tag resolution → handler dispatch → domain object recovery
 - `ExprMetadata.builders` tuple stores handler metadata in catalog sidecar YAML
 - Third-party handlers register via `"xorq.from_tag_node"` entry point in pyproject.toml
 
-## ML Pipeline Pattern
-
-```python
-import xorq.api as xo
-from xorq.expr.ml.pipeline_lib import Pipeline
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
-
-train_expr = xo.deferred_read_csv("/path/to/train.csv")
-
-sk_pipe = make_pipeline(StandardScaler(), LogisticRegression())
-pipeline = Pipeline.from_instance(sk_pipe)
-fitted = pipeline.fit(train_expr, features=["col1", "col2"], target="label")
-expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
-```
-
-**NOTE:** Do NOT use `xo.Pipeline` — it fails inside `xorq build` ([#1864](https://github.com/xorq-labs/xorq/issues/1864)).
-
-- `Pipeline.fit()` is **deferred** — builds expression graph, doesn't execute sklearn
-- `.predict()`, `.transform()`, `.predict_proba()` produce tagged expressions
-- `FittedPipeline.from_tag_node()` replays fit on recovered training source
-- Catalog kind is `ExprBuilder` when added
+For ML pipelines, BSL semantic models, and custom TagHandler workflows, see `/xorq:builder`.
 
 ## Catalog Composition
 
-`xorq catalog compose` assembles existing entries into new composed expressions:
-
-- **Source entry** (`kind=Source`) — bound, has data
-- **Transform entries** (`kind=UnboundExpr`) — partial, awaits input
-- `-c "code"` — inline Ibis code applied to `source` variable (**single expression only**, no imports/assignments; for complex logic use a build script)
-- `--dry-run` — preview schema without cataloging
-- `--rename-params entry,old,new` — resolve parameter name collisions
+`xorq catalog compose` assembles existing entries into new composed expressions. For detailed workflows including `catalog run`, inline code, joins via build scripts, and caching, see `/xorq:composer`.
 
 ## Common Pitfalls
 
@@ -127,7 +86,7 @@ expr = fitted.predict(train_expr)  # Tagged with FittedPipelineTagKey.PREDICT
 - **compose only works with unbound_expr transforms**: You cannot compose two Source entries. To join sources, write a build script that loads both via `cat.load("name", con=xo.connect())` into a shared connection
 - **`--no-sync` is only for `catalog add`**: Do NOT use `--no-sync` with `catalog compose` — it doesn't support that flag
 - **Custom TagHandler per-process**: `register_tag_handler()` must be called in every Python process that needs it (including build scripts)
-- **Custom TagHandler hashability**: `extract_metadata` return values must be hashable — use `tuple` not `list`
+- **Custom TagHandler hashability**: Tag metadata values (kwargs to `.tag()`) must be hashable — use `tuple` not `list`, because they're stored in `FrozenOrderedDict`
 - **BSL catalog recovery**: `entry.expr.ls.builder` may fail on catalog-loaded BSL entries due to CatalogSource wrapping — walk the expression graph to find the inner BSL tag node
 
 ## CLI Quick Reference

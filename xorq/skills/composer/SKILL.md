@@ -145,6 +145,7 @@ xorq catalog schema <name> --json
 
 ## Tips
 
+- See CLAUDE.md Common Pitfalls for environment and API issues (VIRTUAL_ENV mismatch, `--no-sync` only for `catalog add`, compose requires `UnboundExpr` transforms, etc.)
 - Start with `xorq catalog run` to test compositions before cataloging them with `compose`.
 - Always use `--dry-run` on `compose` when unsure about compatibility.
 - The source entry must have `kind=Source` or `kind=Composed` (anything with bound data).

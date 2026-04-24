@@ -42,10 +42,10 @@ fitted = pipeline.fit(train, features=["feature1", "feature2"], target="label")
 expr = fitted.predict(train)
 ```
 
-**IMPORTANT — correct imports:**
+**IMPORTANT — correct imports (see CLAUDE.md Common Pitfalls for full list):**
 - `from xorq.expr.ml.pipeline_lib import Pipeline` — this is the correct import for build scripts
-- Do NOT use `xo.Pipeline` — it works in interactive Python but **fails inside `xorq build`** ([#1864](https://github.com/xorq-labs/xorq/issues/1864))
-- Do NOT use `deferred_fit_predict` — it returns a `DeferredFitOther` which is NOT a buildable expression and causes hashing errors. Always use `Pipeline.from_instance(sk_pipe).fit(train, ...).predict(train)` pattern.
+- Do NOT use `xo.Pipeline` in build scripts — see CLAUDE.md "ML Pipeline import" pitfall
+- Do NOT use `deferred_fit_predict` — see CLAUDE.md "ML Pipeline API" pitfall
 
 **Key points:**
 - `Pipeline.fit()` is **deferred** — it builds an expression graph, it does not execute sklearn immediately
@@ -100,10 +100,10 @@ predictions = fitted_pipeline.predict(new_data)
 expr = predictions  # this is what xorq build captures
 ```
 
-**IMPORTANT API notes:**
-- `xo.catalog()` is a MODULE, not callable — use `from xorq.catalog.catalog import Catalog; Catalog.from_default()`
-- Use `cat.load("alias")` — NOT `cat["alias"]` (no subscript support)
-- Use `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` for reading data in build scripts
+**IMPORTANT API notes** (see CLAUDE.md Common Pitfalls for details):
+- Use `Catalog.from_default()` — `xo.catalog()` is a module, not callable
+- Use `cat.load("alias")` — NOT `cat["alias"]`
+- Use `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` in build scripts
 
 ## BSL (Boring Semantic Layer)
 
@@ -183,9 +183,9 @@ expr = queried.to_tagged() if hasattr(queried, 'to_tagged') else recovered_model
 
 ### Registration via Python
 
-**CRITICAL:** The TagHandler must be registered in EVERY Python process that needs it. Since `xorq build` spawns a subprocess, you must register the handler **inside the build script itself** (not in a separate setup step).
+**CRITICAL:** The TagHandler must be registered in EVERY Python process that needs it (see CLAUDE.md "Custom TagHandler per-process" pitfall). Since `xorq build` spawns a subprocess, you must register the handler **inside the build script itself** (not in a separate setup step).
 
-**`.tag()` API (verified):** `expr.tag("tag_name", key=value, key2=value2)` — string tag name + keyword args. NOT a dict.
+**`.tag()` API:** `expr.tag("tag_name", key=value, key2=value2)` — string tag name + keyword args. NOT a dict.
 
 ```python
 import xorq.api as xo
@@ -266,7 +266,7 @@ This avoids needing to re-register in every script.
 - At least one of `extract_metadata` or `from_tag_node` must be provided
 - `tag_names` is a tuple of string tag names the handler responds to
 - Builtin tag names (`bsl`, ML pipeline tags) cannot be overridden without `override=True`
-- **`extract_metadata` must return hashable types** — use `tuple` instead of `list` in returned dicts, because values get wrapped in `FrozenOrderedDict`
+- Tag metadata values (kwargs to `.tag()`) must be hashable — see CLAUDE.md "Custom TagHandler hashability" pitfall
 
 ## Tips
 

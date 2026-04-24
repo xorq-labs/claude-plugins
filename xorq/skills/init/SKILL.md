@@ -122,6 +122,7 @@ This prevents setuptools from auto-discovering data directories as Python packag
 
 ## Tips
 
+- See CLAUDE.md Common Pitfalls for environment and API issues (VIRTUAL_ENV mismatch, flat-layout error, etc.)
 - Use `--no-sync` on `catalog add` if working without a remote: `xorq catalog add builds/<hash> --alias <name> --no-sync`
 - The `expr` variable name is the default. Use `-e <name>` with `xorq build` if the script uses a different variable name.
 - Use `xorq build --debug` to output SQL files for inspection.
