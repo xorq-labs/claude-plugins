@@ -1,13 +1,13 @@
 # xorq plugin for Claude
 
-A Claude plugin that exposes the [xorq](https://github.com/xorq-labs/xorq) CLI as MCP tools, letting Claude build, run, and manage versioned data expressions.
+A Claude plugin for [xorq](https://github.com/xorq-labs/xorq) — build, version, and run composable data expressions from Claude Code using the xorq CLI.
 
 ## Prerequisites
 
-Install xorq with the `mcp` extra:
+Install xorq:
 
 ```bash
-pip install xorq[mcp]
+pip install xorq
 ```
 
 The `xorq` command must be on your `PATH`.
@@ -27,61 +27,23 @@ The `xorq` command must be on your `PATH`.
 claude --plugin-dir ./xorq
 ```
 
-### MCP server only (no plugin)
-
-Add to `.claude/settings.json` or `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "xorq": {
-      "command": "xorq",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
-
-## Available tools
-
-### Catalog (read)
-
-| Tool | Description |
-|------|-------------|
-| `catalog_list` | List all entries in a catalog |
-| `catalog_list_aliases` | List all aliases |
-| `catalog_schema` | Show input/output schema of an entry |
-| `catalog_info` | Show catalog metadata (path, remotes, counts) |
-| `catalog_log` | Show catalog history as structured operations |
-| `catalog_check` | Validate catalog consistency |
-
-### Build and run
-
-| Tool | Description |
-|------|-------------|
-| `build` | Compile a Python script into versioned build artifacts |
-| `run` | Execute a built expression and return results |
-| `run_cached` | Execute with caching for efficient repeated runs |
-
-### Catalog (mutate)
-
-| Tool | Description |
-|------|-------------|
-| `catalog_add` | Add build artifacts to a catalog |
-| `catalog_remove` | Remove entries by name |
-| `catalog_sync` | Pull then push to remote(s) |
-
 ## Skills
 
 | Skill | Description |
 |-------|-------------|
+| `/xorq:init` | Ingest CSV/Parquet files into a catalog |
+| `/xorq:composer` | Compose catalog entries into new aliased expressions |
+| `/xorq:builder` | Create ExprBuilder entries (ML pipelines, BSL, custom TagHandlers) |
 | `/xorq:catalog-explore` | Discover and inspect catalog entries |
-| `/xorq:run-expression` | Build and run data expressions |
 
 ## Architecture
 
-The MCP server wraps CLI commands via subprocess. This keeps the server process lightweight — the heavy `xorq` import only happens in the child process for each tool call.
+The plugin provides skills that guide Claude to use the `xorq` CLI via Bash. No MCP server is required — Claude invokes CLI commands directly.
 
 ```
-Claude <--stdio--> MCP server <--subprocess--> xorq CLI
+Claude --skills--> xorq CLI --subprocess--> xorq engine
 ```
+
+### Ambient context
+
+`CLAUDE.md` provides Claude with background knowledge about xorq concepts (expressions, catalogs, ExprKind, TagHandlers, ML pipelines) so it can assist effectively even outside of explicit skill invocations.
