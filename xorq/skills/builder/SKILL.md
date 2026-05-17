@@ -6,7 +6,21 @@ description: Create ExprBuilder catalog entries — ML pipelines (FittedPipeline
 
 Guide the user through creating catalog entries with recoverable domain objects via the TagHandler registry. This covers ML pipelines, semantic models (BSL), and custom builders.
 
+## When to use / When NOT to use
+
+- **Use when**: creating an `ExprBuilder` entry — ML pipeline (`FittedPipeline`), BSL semantic model, or custom `TagHandler`.
+- **Not when**:
+  - Querying an existing BSL entry → `/xorq:composer` BSL section (much faster — no build script needed; one `compose --dry-run` with inline `source.ls.builder.query(...).to_tagged()`).
+  - Onboarding raw `.csv` / `.parquet` files → `/xorq:init`.
+  - Composing two `Source` entries → `/xorq:composer` build-script subsection.
+
+## Step 0: Resolve target catalog
+
+Before any `xorq catalog …` or `Catalog.from_*` call, run the **Catalog Resolution** procedure from `xorq/CLAUDE.md` — glob for an existing `catalog.yaml`, ask the user about creating `<repo-name>-catalog` if none is found, or fall back to the system default. In build/recovery scripts, use `Catalog.from_repo_path("<resolved-path>")` instead of `Catalog.from_default()` when working with a repo-local catalog.
+
 ## ML Pipelines (FittedPipeline)
+
+Use this section for: fitting an sklearn `Pipeline` against a xorq expression and storing the fitted model as an `ExprBuilder` catalog entry that can be recovered and applied to new data.
 
 ### Prerequisites
 
@@ -54,17 +68,14 @@ expr = fitted.predict(train)
 - The `features` parameter takes a list of column names; `target` is the label column
 - Features must be **numeric columns** — filter out non-numeric columns before fitting
 
-#### 2. Build the script
+#### 2. Build and catalog
 
 ```bash
-xorq build <script.py>
+xorq build <script.py> --builds-dir builds_ml
+xorq catalog add builds_ml/<hash> --alias <model-name>
 ```
 
-#### 3. Add to catalog
-
-```bash
-xorq catalog add builds/<hash> --alias <model-name>
-```
+`--builds-dir builds_ml` is **required** — without it, the build hash will collide with the source's build (see CLAUDE.md "Build hash collision" pitfall).
 
 #### 4. Verify
 
@@ -100,12 +111,19 @@ predictions = fitted_pipeline.predict(new_data)
 expr = predictions  # this is what xorq build captures
 ```
 
+```bash
+xorq build predict_script.py --builds-dir builds_ml
+xorq catalog add builds_ml/<hash> --alias <predictions-name>
+```
+
 **IMPORTANT API notes** (see CLAUDE.md Common Pitfalls for details):
 - Use `Catalog.from_default()` — `xo.catalog()` is a module, not callable
 - Use `cat.load("alias")` — NOT `cat["alias"]`
 - Use `xo.deferred_read_csv()` / `xo.deferred_read_parquet()` in build scripts
 
 ## BSL (Boring Semantic Layer)
+
+Use this section for: **creating** a new BSL `ExprBuilder` entry (defining dimensions/measures over a source). For **querying** an existing BSL entry, use `/xorq:composer` BSL section instead — it's a one-shot `compose --dry-run` with no build script.
 
 BSL entries wrap expressions with semantic model metadata (dimensions, measures, descriptions).
 
@@ -140,46 +158,76 @@ expr = model.to_tagged()
 # queried = model.query(dimensions=["category"], measures=["total_amount"])
 ```
 
-### Recovery from catalog
+Build and catalog:
 
-**`from_tagged(cat.load("alias"))` WILL FAIL** because catalog wraps with HashingTag. You MUST walk the tags to find the BSL tag node:
+```bash
+xorq build create_bsl.py --builds-dir builds_bsl
+xorq catalog add builds_bsl/<hash> --alias <bsl-name>
+```
+
+`--builds-dir builds_bsl` is **required** — the BSL expression wraps the same source, so without it the build hash collides with the source's build.
+
+### Querying a BSL entry — default to `compose --dry-run`
+
+Once a BSL entry is in the catalog (kind `ExprBuilder`), the **preferred way to query it** is to compose it with inline `-c` code that calls `.ls.builder.query(...).to_tagged()`. Always start with `--dry-run` to preview the resulting schema before materialising anything:
+
+```bash
+xorq catalog -p <catalog-path> compose <bsl-source-entry> \
+  -c 'source.ls.builder.query(
+        dimensions=["dim1","dim2"],
+        measures=["measure1","measure2"]
+      ).to_tagged()' \
+  --dry-run
+```
+
+The dry-run prints the composition plan (entries, code, resulting schema). If it looks right:
+
+- **To execute and view results** (no catalog write): swap `compose --dry-run` for `run -f json --limit 20` and drop the `-a` flag.
+- **To catalog the resulting expression**: drop `--dry-run` and add `-a <alias>`:
+  ```bash
+  xorq catalog -p <catalog-path> compose <bsl-source-entry> \
+    -c 'source.ls.builder.query(dimensions=[...], measures=[...]).to_tagged()' \
+    -a <alias>
+  ```
+
+Chain a transform entry into the same `compose` if you want to layer further on top:
+
+```bash
+xorq catalog -p <catalog-path> compose <bsl-source-entry> <transform-entry> \
+  -c '…to_tagged()' --dry-run
+```
+
+`.to_tagged()` is required at the end — `.query()` alone returns a `SemanticAggregate` which is NOT buildable by `xorq build` / `compose`.
+
+### Recovery from catalog (Python — for build scripts)
+
+`expr.ls.builder` recovers the `SemanticModel` directly from a catalog-loaded BSL entry. No tag-walking, no `from_tagged()` workaround:
 
 ```python
-from boring_semantic_layer import from_tagged
+import xorq.api as xo
 from xorq.catalog.catalog import Catalog
 
-cat = Catalog.from_default()
+cat = Catalog.from_repo_path("<catalog-path>")  # or Catalog.from_default()
 loaded_expr = cat.load("my_bsl_entry")
 
-# Walk tags to find the BSL tag — do NOT pass loaded_expr directly to from_tagged
-tags = loaded_expr.ls.get_tags()
-bsl_tag = [t for t in tags if hasattr(t, "tag") and t.tag == "bsl"][0]
-recovered_model = from_tagged(bsl_tag.to_expr())
+recovered_model = loaded_expr.ls.builder      # SemanticModel
 
-# To build a new expression from the recovered model:
-expr = recovered_model.to_tagged()  # this is buildable by xorq build
+# Buildable: tag the model directly, or query then tag
+expr = recovered_model.to_tagged()
+# OR with a specific query:
+# expr = recovered_model.query(dimensions=["region"], measures=["avg_amount"]).to_tagged()
 ```
 
-**IMPORTANT:** `.query()` returns `SemanticAggregate`, which is NOT directly buildable by `xorq build`. You MUST call `.to_tagged()` on the recovered model to get a buildable expression:
+**Always end with `.to_tagged()`** — bare `.query()` returns a `SemanticAggregate` which is NOT buildable by `xorq build`. For one-shot composition, prefer the inline `compose --dry-run` flow above; drop into a build script only when you need multi-step Python logic.
 
-```python
-expr = recovered_model.to_tagged()  # buildable — use this
-# NOT: expr = recovered_model.query(...)  # SemanticAggregate — xorq build will fail
-```
-
-If you want to query with specific dimensions/measures AND make it buildable, query first then tag:
-
-```python
-queried = recovered_model.query(dimensions=["region"], measures=["avg_amount"])
-# queried is SemanticAggregate — wrap it for build:
-expr = queried.to_tagged() if hasattr(queried, 'to_tagged') else recovered_model.to_tagged()
-```
-
-- The expression is tagged with `"bsl"` containing SemanticModel metadata
-- `entry.expr.ls.builder` recovers the `SemanticTableOp` for requerying (when not wrapped by CatalogSource)
-- Catalog kind is `ExprBuilder`
+- Catalog kind for BSL entries is `ExprBuilder`
+- The stored expression carries a `"bsl"` tag whose metadata is the serialised SemanticModel
 
 ## Custom TagHandlers
+
+Use this section for: defining a domain object that recovers from arbitrary metadata stored on an expression tag (anything that isn't an ML `FittedPipeline` or a BSL `SemanticModel`).
+
+**Always** use `--builds-dir builds_custom` when building tagged scripts (required to avoid hash collisions — see CLAUDE.md "Build hash collision" pitfall).
 
 ### Registration via Python
 
@@ -204,6 +252,21 @@ expr = source.tag("my_custom_tag", column="age", threshold=0.5)
 # tag_node.metadata will be {"tag": "my_custom_tag", "column": "age", "threshold": 0.5}
 ```
 
+### Tag metadata must reflect the data
+
+If your tag stores parameters derived from the source (means, stds, thresholds, bucket edges), **compute them from the source expression before tagging** — do not embed magic numbers in both the transform and the `.tag()` call. The whole point of the handler's `from_tag_node` recovery is that the metadata matches the transform.
+
+One-line pattern:
+
+```python
+mean = source.col.mean().execute()
+std  = source.col.std().execute()
+normalized = source.mutate(col_norm=(source.col - mean) / std)
+expr = normalized.tag("normalization_config", column="col", mean=mean, std=std)
+```
+
+The values bind once, flow into both the `mutate` and the `tag`, and round-trip cleanly via `recovered.from_tag_node()`.
+
 ### Complete round-trip example (build + recover)
 
 **Script 1: Create and catalog the tagged expression**
@@ -219,6 +282,11 @@ register_tag_handler(TagHandler(
 
 source = xo.deferred_read_csv("/path/to/data.csv")
 expr = source.tag("my_custom_tag", column="age", transform="filter_positive")
+```
+
+```bash
+xorq build create_tagged.py --builds-dir builds_custom
+xorq catalog add builds_custom/<hash> --alias my_tagged_entry
 ```
 
 **Script 2: Recover from catalog and create new expression**
@@ -241,6 +309,11 @@ builder = loaded_expr.ls.builder  # returns dict from from_tag_node
 # Use recovered metadata to create a new expression
 new_data = xo.deferred_read_csv("/path/to/new_data.csv")
 expr = new_data.tag("my_custom_tag", **{k: v for k, v in builder.items() if k != "tag"}, derived=True)
+```
+
+```bash
+xorq build recover_tagged.py --builds-dir builds_custom
+xorq catalog add builds_custom/<hash> --alias my_derived_entry
 ```
 
 ### Registration via entry point (persistent across processes)
@@ -270,7 +343,6 @@ This avoids needing to re-register in every script.
 
 ## Tips
 
-- **Build hash collision**: A BSL or ML expression built from the same source data may produce the same build hash as the source's original build. This overwrites the `builds/<hash>/` directory. Always `catalog add` the builder entry BEFORE rebuilding the source, or use separate build directories (`--builds-dir`).
 - ML pipeline `fit()` is deferred — the actual sklearn fitting happens at `xorq run` time, not at script execution
 - The training source is structurally embedded in the expression graph — `FittedPipeline.from_tag_node()` walks the graph to find it
 - `ExprMetadata.builders` stores extracted metadata so you can inspect pipeline steps without fetching the full archive

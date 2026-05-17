@@ -6,7 +6,18 @@ description: Explore a xorq catalog — list entries, inspect schemas, and under
 
 Use the xorq CLI to help the user explore their catalog.
 
+## When to use / When NOT to use
+
+- **Use when**: listing entries, inspecting schemas, validating consistency, viewing catalog history.
+- **Not when**:
+  - Actually executing or composing entries → `/xorq:composer`.
+  - Adding new entries → `/xorq:init` (raw files) or `/xorq:builder` (ML / BSL / custom tags).
+
 ## Workflow
+
+### 0. Resolve target catalog
+
+Before exploring, run the **Catalog Resolution** procedure from `xorq/CLAUDE.md` — glob for an existing `catalog.yaml` in the repo, ask the user about creating `<repo-name>-catalog` if none is found, or fall back to the system default. If the user passed a `-n <name>` or `-p <path>` argument, use that directly and skip the prompt.
 
 ### 1. Discover entries
 
@@ -16,12 +27,11 @@ List all entries with their kinds:
 xorq catalog list --kind
 ```
 
-If the user specified a catalog name or path, pass it through:
+If the user specified a catalog name or path, pass it through. **`-n` / `-p` are global flags on `xorq catalog` — they go BEFORE the subcommand:**
 
 ```bash
-xorq catalog list --kind -n <catalog-name>
-# or
-xorq catalog list --kind -p <catalog-path>
+xorq catalog -n <name> list --kind
+xorq catalog -p <path> list --kind
 ```
 
 ### 2. Inspect schemas

@@ -6,6 +6,20 @@ description: Compose and run xorq catalog entries. Use when the user wants to co
 
 Compose existing catalog entries, run them, and optionally catalog the results.
 
+## When to use / When NOT to use
+
+- **Use when**: running an entry, previewing a composition, layering `UnboundExpr` transforms, joining sources via a build script, or building a script that captures an `expr`.
+- **Not when**:
+  - Onboarding raw `.csv` / `.parquet` files → `/xorq:init`.
+  - Creating an `ExprBuilder` (BSL / ML / custom TagHandler) entry → `/xorq:builder`.
+  - Pure discovery / schema inspection → `/xorq:catalog-explore`.
+
+## Step 0: Resolve target catalog
+
+Before any `xorq catalog …` call, run the **Catalog Resolution** procedure from `xorq/CLAUDE.md` — glob for an existing `catalog.yaml` in the repo, ask the user about creating `<repo-name>-catalog` if none is found, or fall back to the system default. All commands below assume the resolved catalog is in scope (named via `XORQ_DEFAULT_CATALOG` for the CLI, or `Catalog.from_repo_path(...)` for Python).
+
+This applies to both **reads** (`xorq catalog run`, `xorq catalog list`, `cat.load(...)`) and **writes** — `xorq catalog compose -a <alias>` and `xorq catalog add builds/<hash> -a <alias>` both add new entries back to the resolved catalog, so it must be the one the user expects before you compose-and-store.
+
 ## Quick start: `xorq catalog run`
 
 The fastest way to compose and execute — composes entries and runs them in one step (does not catalog the result):
@@ -35,17 +49,24 @@ Options:
 
 ## Composing and cataloging
 
+### Inline `-c` code constraints
+
+- **Single expression on one line** — no imports, no assignments, no multiline.
+- **No bitwise ops** (`&`, `|`, `~`) — chain `.filter()` calls instead of `&`; use multiple compose passes or a build script for `|` / `~`.
+- Reference columns as `source.<col>` (the input expression is bound to the `source` variable); **do not** use the deferred `_` selector inside `-c`.
+- Lambdas are fine inside `.filter(lambda t: …)` (and other methods that take a row callable).
+- Window functions need an explicit `group_by` — `xo.window(group_by="…")`, not bare `xo.window()`.
+- For anything that won't fit on one line, write a build script (see below).
+
 To compose AND add to the catalog (not just run), use `xorq catalog compose`:
 
 ```bash
 xorq catalog compose <source> -c "source.filter(source.amount > 15)" -a <alias>
 ```
 
-**IMPORTANT:** Only entries with `kind=UnboundExpr` can be used as transform entries. You CANNOT compose two `Source` entries together (e.g., to join them). To join two sources, use inline code (`-c`) on one source and reference the other via Python:
+**IMPORTANT:** Only entries with `kind=UnboundExpr` can be used as transform entries. You CANNOT compose two `Source` entries together (e.g., to join them). To join two sources, write a build script (inline `-c` cannot import or assign — see constraints above):
 
 **Joining two source entries (use a build script — NOT inline code):**
-
-Inline `-c` code must be a **single expression** (no imports, no assignments). For joins or anything requiring multiple statements, write a build script instead:
 
 ```python
 # join_sources.py
@@ -61,8 +82,8 @@ expr = source1.join(source2, "join_key").select("col1", "col2", "col3")
 ```
 
 ```bash
-xorq build join_sources.py
-xorq catalog add builds/<hash> -a <alias>
+xorq build join_sources.py --builds-dir builds_compose
+xorq catalog add builds_compose/<hash> -a <alias>
 ```
 
 **Source + transforms (unbound_expr only):**
@@ -77,7 +98,7 @@ xorq catalog compose <source> <transform1> <transform2> -a <alias>
 xorq catalog compose <source> -c "source.filter(source.amount > 15)" -a <alias>
 ```
 
-The inline code receives the expression as the `source` variable. **`-c` must be a single expression on one line** — no imports, no assignments, no multiline code. For anything more complex, write a build script.
+See **Inline `-c` code constraints** above for the rules that govern `-c`.
 
 **Preview without cataloging (dry run):**
 
@@ -90,6 +111,25 @@ xorq catalog compose <source> <transform> --dry-run
 ```bash
 xorq catalog compose <source> <transform> --rename-params <transform>,old_param,new_param -a <alias>
 ```
+
+## BSL entries — default to `compose --dry-run`
+
+When the source entry is a BSL (`kind=ExprBuilder` with a `bsl` tag), `source.ls.builder` recovers the `SemanticModel` directly — no tag-walking. Compose by calling `.query(...).to_tagged()` on the recovered model inline, and **always start with `--dry-run`** to preview the resulting schema:
+
+```bash
+xorq catalog -p <catalog-path> compose <bsl-source> [<transform-entry> …] \
+  -c 'source.ls.builder.query(
+        dimensions=["dim1","dim2"],
+        measures=["m1","m2"]
+      ).to_tagged()' \
+  --dry-run
+```
+
+If the dry-run schema is correct:
+- **Catalog it**: drop `--dry-run`, add `-a <alias>`.
+- **Just execute and inspect**: swap to `xorq catalog -p … run <bsl-source> … -c '…to_tagged()' -f json --limit 20`.
+
+`.to_tagged()` at the end is required — `.query()` alone returns a `SemanticAggregate` which is NOT buildable. See `/xorq:builder` for the full BSL workflow.
 
 ## Building from a script
 
@@ -150,7 +190,7 @@ xorq catalog schema <name> --json
 - Always use `--dry-run` on `compose` when unsure about compatibility.
 - The source entry must have `kind=Source` or `kind=Composed` (anything with bound data).
 - Transform entries must have `kind=UnboundExpr`.
-- Inline code (`-c`) is Ibis expression syntax applied to the `source` variable.
+- Inline code (`-c`) is Ibis expression syntax applied to the `source` variable — see **Inline `-c` code constraints** above.
 - Composed entries are tagged with `CatalogTag.SOURCE`, `CatalogTag.TRANSFORM`, and `CatalogTag.CODE` for provenance tracking.
 
 ## Arguments
