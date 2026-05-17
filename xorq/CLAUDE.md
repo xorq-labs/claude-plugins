@@ -25,6 +25,16 @@ expr = expr.filter(_.amount > 100).select("id", "amount", "category")
 ### Builds
 `xorq build script.py` compiles a Python script's `expr` variable into **content-addressed artifacts** under `builds/`. The build hash is deterministic — same expression always produces the same hash.
 
+**Build directory convention:** Use `--builds-dir` to isolate builds by kind and prevent hash collisions (see Common Pitfalls → "Build hash collision"):
+
+| Kind | `--builds-dir` | Example |
+|------|----------------|---------|
+| Source ingestion | `builds_source` | `xorq build ingest.py --builds-dir builds_source` |
+| ML pipeline | `builds_ml` | `xorq build train.py --builds-dir builds_ml` |
+| BSL semantic model | `builds_bsl` | `xorq build bsl.py --builds-dir builds_bsl` |
+| Custom TagHandler | `builds_custom` | `xorq build tagged.py --builds-dir builds_custom` |
+| General scripts | `builds` (default) | `xorq build script.py` |
+
 ### Catalogs
 Catalogs are **git-backed registries** of versioned expressions. Each entry is a zip archive with expression metadata stored in sidecar YAML.
 
@@ -47,6 +57,68 @@ joined = t1.join(t2, "key_col")
 # NOTE: cat["name"] does NOT work — use cat.load("name")
 # NOTE: xo.catalog() is a MODULE, not callable — use Catalog.from_default()
 ```
+
+## Catalog Resolution (do this FIRST in every skill)
+
+Before any `xorq catalog …` or `Catalog.from_*` call, resolve which catalog to use. **Never silently use `default`** — be explicit, and prefer a repo-scoped catalog.
+
+### Procedure
+
+1. **Glob the repo for an existing catalog.** From the repo root, search for `catalog.yaml` (the catalog spec file). Use the `Glob` tool, then exclude the usual ignore paths:
+
+   ```
+   pattern: **/catalog.yaml
+   ```
+
+   Discard hits inside `venv/`, `.venv/`, `node_modules/`, `.git/`, `__pycache__/`, `builds/`, or any nested catalog's own `entries/` / `aliases/`. The parent directory of a surviving hit is a candidate catalog (e.g. a hit at `./local_catalog/catalog.yaml` → catalog path `./local_catalog`).
+
+2. **Decide based on what was found.**
+   - **Exactly one candidate** → use it. Record the path; call it `CATALOG_PATH`.
+   - **More than one** → list them to the user and ask which one (`AskUserQuestion`).
+   - **None** → propose creating one. Compute `name="$(basename "$PWD")-catalog"` and ask the user via `AskUserQuestion`:
+     > "No xorq catalog found in this repo. Create `<name>` as a repo-local catalog?" — options: **Yes** / **No, use the system default**.
+
+     - If **Yes**: init a fresh repo-local catalog at `./<name>/`:
+       ```python
+       import xorq.api as xo
+       xo.catalog.Catalog.from_repo_path("./<name>", init=True)
+       ```
+       Use `CATALOG_PATH=./<name>`.
+     - If **No**: skip the path; fall back to the system default (`Catalog.from_default()`, no env override). Tell the user "using the system default catalog".
+
+3. **Scope every CLI call to the resolved catalog.** `xorq catalog` accepts **global** `-n <name>` / `-p <path>` flags that go BEFORE the subcommand (mutually exclusive):
+
+   ```bash
+   xorq catalog -p ./<name> list --kind          # repo-local catalog at ./<name>/
+   xorq catalog -p ./<name> compose source -c "…" --dry-run
+   xorq catalog -p ./<name> add builds/<hash> -a <alias>
+
+   xorq catalog -n <name> list --kind            # named catalog under ~/.local/share/xorq/catalogs/<name>
+   ```
+
+   Threading `-p` / `-n` on every call is preferred over `export XORQ_DEFAULT_CATALOG=…` because it's explicit and survives subshells. For the Python API, use `Catalog.from_repo_path(CATALOG_PATH)` for repo-local or `Catalog.from_name(NAME)` for named.
+
+   Optional: `xorq catalog default <name>` persists a named catalog as the active default across sessions. Use this only when the user explicitly wants a sticky default; otherwise prefer explicit `-p`/`-n` on each call.
+
+4. **Surface the decision to the user.** Once resolved, state plainly: `Using catalog: <name> at <path>` (or `Using system default catalog`). Don't keep re-asking on subsequent steps in the same session.
+
+### Notes
+- Re-run the resolution at the start of each new skill invocation, but cache the decision for the rest of the session.
+- The `<root>-catalog` naming convention keeps repo and catalog name aligned so `xorq catalog info` is self-describing.
+- If the user passes a `-n <name>` or `-p <path>` argument to the skill, skip the procedure and use what they provided.
+
+## Skill Decision Tree
+
+Route the user to the right skill on first contact. Each skill also carries its own "When to use / When NOT to use" block that cross-references siblings.
+
+| User intent | Skill |
+|---|---|
+| What's in the catalog? Inspect entries / schemas | `/xorq:catalog-explore` |
+| Onboard raw `.csv` / `.parquet` files | `/xorq:init` |
+| Run an existing entry, dry-run preview, compose+catalog, build a script | `/xorq:composer` |
+| Query an existing BSL `ExprBuilder` (one-shot, exploratory) | `/xorq:composer` → BSL section (`compose --dry-run` with `source.ls.builder.query(...).to_tagged()`) |
+| Create a new BSL / ML pipeline / custom-tag entry | `/xorq:builder` |
+| Join two `Source` entries | `/xorq:composer` → build-script subsection |
 
 ## ExprKind Taxonomy
 
@@ -78,6 +150,7 @@ For ML pipelines, BSL semantic models, and custom TagHandler workflows, see `/xo
 
 - **VIRTUAL_ENV mismatch**: If you see `VIRTUAL_ENV=... does not match the project environment path .venv`, use `uv run --active` for all uv/xorq commands — e.g. `uv run --active xorq build script.py`
 - **pyproject.toml flat-layout error**: If `xorq catalog add` fails with `Multiple top-level packages discovered in a flat-layout`, add `[tool.setuptools]\npy-modules = []` to pyproject.toml
+- **Build hash collision**: A BSL, ML, or custom-tag expression built from the same source data will produce the **same build hash** as the source's own build, because the underlying expression is identical. This silently overwrites `builds/<hash>/` and corrupts whichever entry was added first. **Always use `--builds-dir` per kind** (see the Builds section table) — e.g. `--builds-dir builds_source` for ingestion, `--builds-dir builds_ml` for ML. This is the single most common failure mode in multi-step workflows.
 - **ML Pipeline import**: Use `from xorq.expr.ml.pipeline_lib import Pipeline` in build scripts. `xo.Pipeline` works in interactive Python but **fails inside `xorq build`** ([#1864](https://github.com/xorq-labs/xorq/issues/1864))
 - **ML Pipeline API**: Use `Pipeline.from_instance(sk_pipe).fit(train, features=[...], target="...").predict(train)`. Do NOT use `deferred_fit_predict` — it returns a non-buildable object
 - **sklearn dependency**: sklearn is NOT bundled — add `scikit-learn` to project dependencies
@@ -87,7 +160,8 @@ For ML pipelines, BSL semantic models, and custom TagHandler workflows, see `/xo
 - **`--no-sync` is only for `catalog add`**: Do NOT use `--no-sync` with `catalog compose` — it doesn't support that flag
 - **Custom TagHandler per-process**: `register_tag_handler()` must be called in every Python process that needs it (including build scripts)
 - **Custom TagHandler hashability**: Tag metadata values (kwargs to `.tag()`) must be hashable — use `tuple` not `list`, because they're stored in `FrozenOrderedDict`
-- **BSL catalog recovery**: `entry.expr.ls.builder` may fail on catalog-loaded BSL entries due to CatalogSource wrapping — walk the expression graph to find the inner BSL tag node
+- **BSL catalog recovery**: `expr.ls.builder` recovers the `SemanticModel` directly from a catalog-loaded BSL entry — call `.query(...).to_tagged()` (or just `.to_tagged()`) on it. Always end with `.to_tagged()`; a bare `.query()` returns a `SemanticAggregate` which is NOT buildable by `xorq build`
+- **Do NOT parallelize `xorq catalog add`**: the catalog's underlying git / git-annex operations are not concurrency-safe. Multiple simultaneous adds will cancel each other (observed in iterate.sh log O1). Run adds sequentially — one at a time — and chain with `&&` if needed. This applies equally to `init`, `composer`, and `builder` skill flows.
 
 ## CLI Quick Reference
 
