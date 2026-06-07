@@ -1,0 +1,56 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  deterministic:
+    name: deterministic skill suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync env (locked)
+        run: uv sync --locked --group test
+
+      - name: Run deterministic suite (no LLM)
+        run: uv run pytest tests/ -q
+
+  llm-e2e:
+    name: LLM e2e (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync env (locked)
+        run: uv sync --locked --group test
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      # Seeded from tests/data/*.csv via tests/postgres-init.sql, so the POSTGRES
+      # prompt actually runs (it skips otherwise). The fixture data is committed under
+      # tests/data/ (tracked), so it's present on the runner.
+      - name: Start Postgres (seeded)
+        run: docker compose up -d --wait
+
+      - name: Run LLM e2e suite
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: xorq
+          POSTGRES_USER: xorq
+          POSTGRES_PASSWORD: xorq
+        run: uv run pytest -m llm -q

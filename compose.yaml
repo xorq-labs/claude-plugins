@@ -1,0 +1,25 @@
+# Postgres service for verifying / testing the xorq `init` skill's Postgres
+# ingestion path — usable locally (`docker compose up -d`) and in CI.
+#
+# Connection (matches tests/conftest.py defaults and the skill examples):
+#   host=localhost port=5432 user=xorq password=xorq database=xorq
+#
+# On first start it seeds the tables from tests/data/*.csv via
+# tests/postgres-init.sql (runs once, when the data volume is empty).
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: xorq
+      POSTGRES_PASSWORD: xorq
+      POSTGRES_DB: xorq
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./tests/data:/seed:ro
+      - ./tests/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xorq -d xorq"]
+      interval: 2s
+      timeout: 5s
+      retries: 20

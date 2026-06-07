@@ -1,0 +1,18 @@
+[project]
+name = "e2e-test"
+version = "0.1.0"
+requires-python = ">=3.13,<3.14"
+dependencies = ["xorq[duckdb,sqlite,postgres,bsl,examples]"]
+
+[tool.setuptools]
+py-modules = []
+
+[dependency-groups]
+test = ["pytest", "pytest-xdist"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not llm'"
+markers = [
+  "llm: end-to-end tests that drive the Claude CLI (run via -m llm; deselected by default)",
+]

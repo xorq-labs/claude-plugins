@@ -1,136 +1,134 @@
 ---
-description: Ingest CSV or Parquet files into a xorq catalog. Use when the user wants to onboard raw data files, create catalog entries from local files, or set up a new data source with an alias.
+description: Set up and populate a xorq catalog WITHOUT building — create a new catalog, clone or submodule an existing one (-u / -r), pull updates, and copy entries between catalogs (replay, get + add). Use when onboarding to a shared catalog or vendoring one into a repo.
 ---
 
-# Init — Ingest Data Files into a Catalog
+# Init — Set Up & Populate a Catalog (no build)
 
-Guide the user through turning raw CSV/Parquet files into cataloged, versioned xorq expressions.
+A xorq catalog is a **git + git-annex repo**. Entries are content-addressed build
+artifacts that are built **once** and then distributed git-style. This skill is the
+**no-build** path: create a catalog, acquire an existing one, keep it in sync, and copy
+entries between catalogs — none of which rebuilds anything.
 
-## When to use / When NOT to use
+> **Need to originate a net-new `Source`** from raw data (a `.csv`/`.parquet` file or a
+> DuckDB/SQLite/Postgres table) that exists in **no** catalog yet? That's the one
+> operation that requires a build — see the **`ingest`** skill (`deferred_read_*` →
+> `xorq build` → `xorq catalog add`).
 
-- **Use when**: the user has raw `.csv` / `.parquet` files they want to register as cataloged sources.
-- **Not when**:
-  - They want to join existing catalog entries → `/xorq:composer`.
-  - They want to fit a model or tag an expression (BSL / ML / custom TagHandler) → `/xorq:builder`.
-  - They want to inspect what's already cataloged → `/xorq:catalog-explore`.
+## Resolve / target the catalog
 
-## Workflow
+Run the **Catalog Resolution** procedure in `xorq/CLAUDE.md` first. The `-n / -p / -u / -r`
+selectors are **global flags on the `xorq catalog` group** — they come **before** the
+subcommand. How they combine (verified against the resolver, `Catalog.from_kwargs`):
 
-### 0. Resolve target catalog
+| Flags | Resolves to |
+|-------|-------------|
+| `-p <dir>` | catalog repo at `<dir>` |
+| `-n <name>` | named catalog under `~/.local/share/xorq/catalogs/<name>` |
+| `-u <url>` *(opt. `+ -p <dest>`)* | **clone** the remote catalog (to `<dest>` if given) |
+| `-r <root> -u <url>` | **clone as submodule** at `<root>/.xorq/catalogs/<name>` |
+| `-r <root> -n <name>` | add the **named** catalog as a submodule under `<root>` |
 
-Before anything else, run the **Catalog Resolution** procedure from `xorq/CLAUDE.md` — glob the repo for an existing `catalog.yaml`, and if none is found, ask the user whether to create `<repo-name>-catalog` (yes) or fall back to the system default (no). Record the resolved name/path; all subsequent `xorq catalog …` commands in this skill assume it.
+`-n`↔`-p` and `-n`↔`-u` are mutually exclusive; `-r` **requires** exactly one of
+`-n`/`-u` and **cannot** combine with `-p`.
 
-### 1. Verify the resolved catalog
+## Acquire an existing catalog (no build)
+
+The entries were built by whoever published the catalog; you just fetch them.
+
+**Clone** a remote catalog — get all its entries:
+```bash
+xorq catalog clone <url> -p ./<repo>-catalog      # or: -n <name>
+xorq catalog -u <url> -p ./<repo>-catalog list --kind   # equivalent via group flag
+```
+
+**Submodule** — vendor a catalog into your repo, pinned to a commit:
+```bash
+xorq catalog -r <repo-root> -u <url> info         # clone-as-submodule
+xorq catalog -r <repo-root> -n <name> info        # named catalog as submodule
+# lands at <repo-root>/.xorq/catalogs/<name>
+```
+
+**Pull** newer entries from the configured remote (and `sync` = pull then push):
+```bash
+xorq catalog -p "$CAT" pull
+xorq catalog -p "$CAT" sync
+```
+
+## Create a new (empty) catalog
 
 ```bash
-xorq catalog info
+xorq catalog -p ./<repo>-catalog init
+```
+Optionally wire a git remote and git-annex archive storage up front (the archives — the
+heavy build artifacts — live in a git-annex special remote, e.g. S3/GCS):
+```bash
+xorq catalog -p ./<repo>-catalog init \
+  --remote-url <git-url> \
+  --env-prefix XORQ_CATALOG_S3_ --env-file .env.catalog.s3      # add --gcs for GCS
+```
+Set or replace the git remote later (a catalog has **at most one** remote, ADR-0011 —
+`set-remote` refuses to overwrite without `--force`):
+```bash
+xorq catalog -p "$CAT" set-remote <git-url>          # --force to replace
 ```
 
-If Step 0 created a fresh catalog, this confirms it. Remotes are **opt-in** — only attach one if the user explicitly wants to share/push builds to a git repo (see `xorq catalog init --help`).
+## Copy entries between catalogs (no rebuild)
 
-### 2. Write an ingestion script
-
-Create a small Python script that reads the data file. The script must define an `expr` variable (the default name `xorq build` captures).
-
-**For CSV files:**
-
-```python
-import xorq.api as xo
-
-expr = xo.deferred_read_csv("/absolute/path/to/data.csv")
+**Replay** — copy entries from a source catalog into a target:
+```bash
+xorq catalog -p <src> replay <target-path>             # copy as-is, no rebuild
+xorq catalog -p <src> replay <target-path> --rebuild   # re-add under current code
+xorq catalog -p <src> replay <target-path> --dry-run   # preview only
+# --remote-url sets the target's origin and pushes
 ```
 
-**For Parquet files:**
-
-```python
-import xorq.api as xo
-
-expr = xo.deferred_read_parquet("/absolute/path/to/data.parquet")
+**Transfer a single entry** — export its built archive, add it elsewhere (an
+already-built archive is registered as-is; no rebuild). `get` takes the entry **hash**
+(from `list`, **not** an alias) and writes `<hash>.zip` into an **existing** directory:
+```bash
+HASH=$(xorq catalog -p <src> list --kind | awk '$2=="source"{print $1; exit}')
+mkdir -p /tmp/x
+xorq catalog -p <src> get "$HASH" -o /tmp/x          # -> /tmp/x/<hash>.zip
+xorq catalog -p <dst> add "/tmp/x/$HASH.zip" -a <alias>
 ```
 
-**With transforms (optional):**
-
-```python
-import xorq.api as xo
-from xorq.api import _
-
-expr = xo.deferred_read_csv("/absolute/path/to/data.csv")
-expr = expr.filter(_.amount > 0).select("id", "amount", "category")
-```
-
-Use absolute paths for data files.
-
-### 3. Build the script
+## Verify
 
 ```bash
-xorq build <script.py> --builds-dir builds_source
+xorq catalog -p "$CAT" info                  # path, remotes, entry/alias counts
+xorq catalog -p "$CAT" list --kind
+xorq catalog -p "$CAT" list-aliases
+xorq catalog -p "$CAT" log --json            # history as structured operations
+xorq catalog -p "$CAT" show <entry|alias>    # full metadata
+xorq catalog -p "$CAT" schema <alias> --json
 ```
 
-This produces artifacts under `builds_source/<hash>/`. Note the build path from the output. Using `--builds-dir builds_source` prevents hash collisions with builder entries (ML, BSL, custom tags) that wrap the same source data — see CLAUDE.md "Build hash collision" pitfall.
-
-### 4. Add to catalog with alias
-
+Preview an acquired entry's rows — **`-o -` is required** (output defaults to `/dev/null`):
 ```bash
-xorq catalog add builds_source/<hash> --alias <name>
+xorq catalog -p "$CAT" run <alias> -o - -f json --limit 5
 ```
+`catalog run` reconstructs the entry's pinned environment in an isolated `uv tool run`;
+add `--use-this-venv` to run in the current environment when it already has the drivers.
 
-The alias gives the entry a human-readable name. Multiple aliases can be added:
+## Pitfalls
 
-```bash
-xorq catalog add builds/<hash> --alias <name1> --alias <name2>
-```
+- **Archives live in git-annex.** `clone`/`pull` fetch git metadata + annex pointers;
+  fetching the actual build archives needs the catalog's annex remote configured (the
+  `XORQ_CATALOG_*` env prefixes). For read-only sharing, the publisher embeds creds with
+  `xorq catalog embed-readonly --env-prefix … --env-file …` so consumers can fetch.
+- **One git remote per catalog** (ADR-0011) → `set-remote` refuses to overwrite without
+  `--force`.
+- **`-r` needs a partner** → pair it with `-n` or `-u`, never `-p`.
+- **Parallel ops corrupt the catalog** → `add`/`get`/`replay` one entry/catalog at a time.
+- **`VIRTUAL_ENV` mismatch** (`VIRTUAL_ENV=… does not match …`) → prefix commands with
+  `uv run --active`.
 
-### 5. Verify
+## Docs
 
-List entries to confirm:
-
-```bash
-xorq catalog list --kind
-```
-
-Inspect the schema:
-
-```bash
-xorq catalog schema <alias> --json
-```
-
-## Batch ingestion
-
-When ingesting multiple files, write one script per file and build/add each sequentially — run `xorq build`, note the printed build path, then `xorq catalog add` that path with an alias:
-
-```bash
-xorq build ingest_customers.py --builds-dir builds_source
-# output prints the build path, e.g. builds_source/abc123...
-xorq catalog add builds_source/<hash> --alias customers
-
-xorq build ingest_orders.py --builds-dir builds_source
-xorq catalog add builds_source/<hash> --alias orders
-```
-
-Add `--no-sync` to `catalog add` if you want to defer pushing to the remote until the batch is complete.
-
-## pyproject.toml setup
-
-**IMPORTANT:** If `xorq catalog add` fails with `Multiple top-level packages discovered in a flat-layout`, add this to `pyproject.toml`:
-
-```toml
-[tool.setuptools]
-py-modules = []
-```
-
-This prevents setuptools from auto-discovering data directories as Python packages.
-
-## Tips
-
-- See CLAUDE.md Common Pitfalls for environment and API issues (VIRTUAL_ENV mismatch, flat-layout error, etc.)
-- Use `--no-sync` on `catalog add` if working without a remote: `xorq catalog add builds/<hash> --alias <name> --no-sync`
-- When the resolved catalog is **repo-local with no remote configured**, prefer `--no-sync` by default on every `catalog add` — there's no upstream to push to, and the sync attempt is wasted work.
-- The `expr` variable name is the default. Use `-e <name>` with `xorq build` if the script uses a different variable name.
-- Use `xorq build --debug` to output SQL files for inspection.
-- After adding, the entry kind should be `Source` (visible with `--kind` flag on list).
-- Use **absolute paths** for data files in scripts to avoid path resolution issues.
-- `xorq build` output shows the build hash — capture it for the `catalog add` step.
+The full, machine-readable index of every CLI command and Python API is at
+<https://docs.xorq.dev/llms.txt>.
 
 ## Arguments
 
-If the user provides arguments: $ARGUMENTS — treat them as file path(s) to ingest.
+If the user provides arguments: $ARGUMENTS — treat them as a catalog URL/path/name to
+acquire or create (`-u`/`-p`/`-n`, `-r` for a submodule), or entries to copy.

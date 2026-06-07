@@ -1,0 +1,26 @@
+# Tracked template for the repo's .gitignore.
+# The working .gitignore is intentionally self-ignored (untracked), so this
+# committed template is the source of truth. After cloning:
+#   cp .gitignore.template .gitignore
+#
+# pyproject.toml + uv.lock are deliberately NOT ignored — they are the committed
+# dev/test environment (see tests/ + .github/workflows/ci-test.yml).
+
+.gitignore
+local_test/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+build/
+builds*/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+.claude/
