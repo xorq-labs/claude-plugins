@@ -20,7 +20,7 @@ jobs:
         run: uv sync --locked --group test
 
       - name: Run deterministic suite (no LLM)
-        run: uv run pytest tests/ -q
+        run: uv run pytest tests/ -q -n auto
 
   llm-e2e:
     name: LLM e2e (manual)
@@ -47,10 +47,10 @@ jobs:
 
       - name: Run LLM e2e suite
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           POSTGRES_HOST: localhost
           POSTGRES_PORT: "5432"
           POSTGRES_DB: xorq
           POSTGRES_USER: xorq
           POSTGRES_PASSWORD: xorq
-        run: uv run pytest -m llm -q
+        run: uv run pytest -m llm -q -n auto

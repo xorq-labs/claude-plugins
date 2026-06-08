@@ -1,9 +1,0 @@
-Builder — the ExprBuilder type machinery (ExprKind.ExprBuilder, tag "expr_builder"):
-an expression whose tags carry domain metadata — "an expr that builds exprs". How to
-get to/from builder exprs, and how to author/register custom TagHandlers
-(extract_metadata / from_tag_node / reemit) via the "xorq.from_tag_node" entry point so
-custom objects round-trip through the catalog.
-
-Boundaries:
-- FittedPipeline is ONE built-in ExprBuilder, but the ML surface lives in ml.
-  builder stays domain-agnostic — the type/extension layer, not model workflows.

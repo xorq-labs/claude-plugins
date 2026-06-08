@@ -224,8 +224,11 @@ def claude_bin():
 @pytest.fixture(scope="session")
 def claude_auth():
     """Skip the LLM suite when headless claude has no way to authenticate."""
-    if not os.environ.get("ANTHROPIC_API_KEY") and not (Path.home() / ".claude").exists():
-        pytest.skip("no claude auth (set ANTHROPIC_API_KEY or log in — ~/.claude missing)")
+    has_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+    if not has_key and not (Path.home() / ".claude").exists():
+        pytest.skip(
+            "no claude auth (set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, or log in — ~/.claude missing)"
+        )
 
 
 @pytest.fixture
