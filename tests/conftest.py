@@ -262,6 +262,20 @@ def seed_files(proj: Path, *names) -> Path:
     return data
 
 
+def seed_builder_module(proj: Path) -> Path:
+    """Copy the trivial custom-builder fixture (slice_builder.py) into the project root.
+
+    Lets the agent ``import slice_builder`` for the custom-builder e2e — importing it registers
+    the ``"text_slice"`` TagHandler, so a tagged expr round-trips (recover via ``.ls.builder``,
+    switch the option, build a new expr). It is NOT an entry point, so recovery only works
+    in-process — which is exactly what the skill's custom-handler path documents.
+    """
+    need_data("slice_builder.py")
+    dst = proj / "slice_builder.py"
+    shutil.copy(DATA / "slice_builder.py", dst)
+    return dst
+
+
 def seed_sqlite(proj: Path) -> Path:
     """Create ``proj/app.db`` (sqlite) with a customers table from customers.csv."""
     need_data("customers.csv")
@@ -599,20 +613,6 @@ def entries_by_kind(xorq_bin, run: ClaudeRun, kinds) -> list:
 def builder_entries(xorq_bin, run: ClaudeRun) -> list:
     """(catalog, hash) for every ``expr_builder`` entry the model created."""
     return entries_by_kind(xorq_bin, run, ("expr_builder",))
-
-
-def catalog_run_code_rows(xorq_bin, cat: Path, ident: str, code: str, limit=1000) -> list:
-    """Run an entry through the ``-c <code>`` round-trip path (current venv, offline) -> JSON rows.
-
-    ``code`` is evaluated in xorq's sandboxed namespace (``source`` / ``xo`` / ``ibis``) — e.g.
-    ``source.ls.builder.predict(xo.deferred_read_parquet("<path>"))`` to recover a builder and
-    re-run it on new data. Mirrors ``catalog_run_rows`` but adds ``-c``.
-    """
-    r = _xq(
-        xorq_bin, "catalog", "-p", str(cat), "run", ident, "-c", code,
-        "--use-this-venv", "-o", "-", "-f", "json", "--limit", str(limit),
-    )
-    return [json.loads(line) for line in r.stdout.splitlines() if line.strip().startswith("{")]
 
 
 def assert_entry_runs(xorq_bin, run: ClaudeRun, check, *, kinds, limit=200):

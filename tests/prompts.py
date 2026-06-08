@@ -77,12 +77,13 @@ class Builder(StrEnum):
     ML_PURCHASE = (
         "Train a model on my dev events to predict whether an event is a purchase, save the "
         "fitted model to the catalog, then load it back from the catalog and use it to score my "
-        "prod events."
+        "prod events — saving the scored prod events to the catalog too."
     )
-    # custom builder round-trip: spec returns first-3 / last-3 chars; build first-3, recover, do last-3
+    # custom builder round-trip: use the provided builder, build first-3, recover, do last-3
     TEXT_SLICE = (
-        "I want a small reusable builder whose spec can return either the first 3 or the last 3 "
-        "characters of a text column. Build one that takes the first 3 characters of the product "
-        "id and save it; then recover that builder from what you saved and use it to produce the "
-        "last-3-characters version, and save that result to the catalog."
+        "I've added a small builder in slice_builder.py that can take the first or last N "
+        "characters of a text column (importing it registers it). Use it to build and save an "
+        "entry with the first 3 characters of the product id; then load that entry back from the "
+        "catalog, recover the builder from it, switch it to the last 3 characters, and save that "
+        "as a new entry."
     )
