@@ -10,6 +10,14 @@ py-modules = []
 [dependency-groups]
 test = ["pytest", "pytest-xdist"]
 
+[tool.xorq-style]
+# These are test files (conftest + test_*), so os.environ is used to build hermetic
+# subprocess environments (copy/filter $XORQ_DEFAULT_CATALOG, set XDG_* / HOME for an
+# isolated temp HOME) — not config reads. env_utils is no drop-in for that, so allow
+# os.environ throughout tests/.
+[tool.xorq-style.os-environ]
+allow-paths = ["tests/"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not llm'"

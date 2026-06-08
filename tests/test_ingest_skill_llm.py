@@ -16,6 +16,11 @@ Opt-in only: ``pytest -m llm``. Skips cleanly when ``claude`` isn't installed, w
 no auth (ANTHROPIC_API_KEY / ~/.claude), or when the fixture data is absent.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+
 import pytest
 
 from conftest import (
@@ -37,7 +42,7 @@ PARQUET_FILES = ["events_dev.parquet", "events_prod.parquet"]
 ALL_FILES = CSV_FILES + PARQUET_FILES
 
 
-def test_llm_ingest_raw(xorq_bin, claude_project, run_claude):
+def test_llm_ingest_raw(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """"load my raw data" -> EVERY file present is its own runnable source entry.
 
     The project is seeded with exactly the 5 data files (3 CSV + 2 parquet, no
@@ -50,7 +55,7 @@ def test_llm_ingest_raw(xorq_bin, claude_project, run_claude):
     assert_sources(xorq_bin, run, [file_schema(DATA / f) for f in ALL_FILES])
 
 
-def test_llm_ingest_sqlite(xorq_bin, claude_project, run_claude):
+def test_llm_ingest_sqlite(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """Only a sqlite db present -> one source = the customers table. Types vary by backend,
     so match column names only."""
     seed_sqlite(claude_project)
@@ -58,7 +63,7 @@ def test_llm_ingest_sqlite(xorq_bin, claude_project, run_claude):
     assert_sources(xorq_bin, run, [file_schema(DATA / "customers.csv")], types=False)
 
 
-def test_llm_ingest_duckdb(xorq_bin, claude_project, run_claude):
+def test_llm_ingest_duckdb(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     pytest.importorskip("duckdb")
     seed_duckdb(claude_project)
     run = run_claude(IngestData.DUCKDB)
@@ -68,7 +73,7 @@ def test_llm_ingest_duckdb(xorq_bin, claude_project, run_claude):
 
 
 @pytest.mark.skipif(not postgres_reachable(), reason="no reachable postgres (docker compose up -d)")
-def test_llm_ingest_postgres(xorq_bin, claude_project, run_claude):
+def test_llm_ingest_postgres(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     # Nothing seeded locally — the model connects to the server via the ${POSTGRES_*} profile.
     run = run_claude(IngestData.POSTGRES, env_extra=POSTGRES_ENV)
     # Running would need the live server in the runner env; assert the source + its schema.

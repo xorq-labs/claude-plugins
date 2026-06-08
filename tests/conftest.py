@@ -13,6 +13,8 @@ The binary under test is, in order of preference:
 If none is found the tests skip rather than fail.
 """
 
+from __future__ import annotations
+
 import csv
 import json
 import os
@@ -22,16 +24,20 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from collections import Counter
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
+import attrs
+import duckdb
 import pytest
+import xorq.api as xo
 
 REPO = Path(__file__).resolve().parent.parent
 DATA = REPO / "tests" / "data"
 
 
-def _find_xorq_bin():
+def _find_xorq_bin() -> str | None:
     if env := os.environ.get("XORQ_BIN"):
         return env
     sibling = Path(sys.executable).parent / "xorq"
@@ -40,26 +46,26 @@ def _find_xorq_bin():
     return shutil.which("xorq")
 
 
-@dataclass
+@attrs.define
 class Result:
     code: int
     stdout: str
     stderr: str
 
     @property
-    def output(self):
+    def output(self) -> str:
         # xorq prints results to stdout and click errors to stderr; assertions
         # generally don't care which stream, so expose the concatenation.
         return self.stdout + self.stderr
 
 
-@dataclass
+@attrs.define
 class XorqCli:
     bin: str
     home: Path
     base_env: dict
 
-    def run(self, *args, env=None):
+    def run(self, *args: str, env: dict | None = None) -> Result:
         full_env = dict(self.base_env)
         if env:
             full_env.update(env)
@@ -82,7 +88,7 @@ class XorqCli:
 
 
 @pytest.fixture(scope="session")
-def xorq_bin():
+def xorq_bin() -> str:
     binp = _find_xorq_bin()
     if not binp:
         pytest.skip("xorq binary not found (set XORQ_BIN or install xorq on PATH)")
@@ -90,7 +96,7 @@ def xorq_bin():
 
 
 @pytest.fixture
-def xorq(xorq_bin, tmp_path):
+def xorq(xorq_bin: str, tmp_path: Path) -> XorqCli:
     """A hermetic xorq CLI runner with an isolated temporary HOME."""
     home = tmp_path / "home"
     home.mkdir()
@@ -115,7 +121,7 @@ def xorq(xorq_bin, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def need_data(*names):
+def need_data(*names: str) -> None:
     """Skip the calling test if any required tests/data file is missing."""
     missing = [n for n in names if not (DATA / n).exists()]
     if missing:
@@ -138,8 +144,6 @@ def build_sqlite_db(dest: Path) -> Path:
 
 def build_duckdb_db(dest: Path) -> Path:
     """Create a duckdb db at ``dest`` with a ``customers`` table from customers.csv."""
-    import duckdb
-
     con = duckdb.connect(str(dest))
     con.execute(
         f"CREATE TABLE customers AS SELECT * FROM read_csv_auto({str(DATA / 'customers.csv')!r})"
@@ -184,7 +188,7 @@ def postgres_reachable() -> bool:
         return False
 
 
-@dataclass
+@attrs.define
 class ClaudeRun:
     """Outcome of one headless claude session: the parsed result + where any catalog
     it created might live (repo-local in the project, or a named catalog under the
@@ -214,7 +218,7 @@ class ClaudeRun:
 
 
 @pytest.fixture(scope="session")
-def claude_bin():
+def claude_bin() -> str:
     binp = shutil.which("claude")
     if not binp:
         pytest.skip("claude CLI not found (npm install -g @anthropic-ai/claude-code)")
@@ -222,7 +226,7 @@ def claude_bin():
 
 
 @pytest.fixture(scope="session")
-def claude_auth():
+def claude_auth() -> None:
     """Skip the LLM suite when headless claude has no way to authenticate."""
     has_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
     if not has_key and not (Path.home() / ".claude").exists():
@@ -232,7 +236,7 @@ def claude_auth():
 
 
 @pytest.fixture
-def claude_project(tmp_path):
+def claude_project(tmp_path: Path) -> Path:
     """A clean, wheel-buildable tmp project dir the ingest skill treats as repo-local.
 
     Bare on purpose: only pyproject.toml + lockfile (so ``xorq catalog add`` can build a
@@ -250,7 +254,7 @@ def claude_project(tmp_path):
     return proj
 
 
-def seed_files(proj: Path, *names) -> Path:
+def seed_files(proj: Path, *names: str) -> Path:
     """Symlink the named tests/data files into ``proj/data`` (builds embed absolute paths)."""
     need_data(*names)
     data = proj / "data"
@@ -305,7 +309,7 @@ SOURCES = {  # alias -> tests/data file
 }
 
 
-def _seed(xorq_bin, proj: Path, *args):
+def _seed(xorq_bin: str, proj: Path, *args: object) -> subprocess.CompletedProcess:
     """Run xorq in ``proj`` (wheel-buildable) for deterministic seeding; fail loudly.
 
     HOME stays real (warm uv cache); git identity is forced via env so ``catalog init``'s
@@ -332,7 +336,7 @@ def _seed(xorq_bin, proj: Path, *args):
     return r
 
 
-def seed_catalog_sources(xorq_bin, proj: Path, names) -> Path:
+def seed_catalog_sources(xorq_bin: str, proj: Path, names: Iterable[str]) -> Path:
     """Create a repo-local catalog in ``proj`` with the named sources added (alias == name).
 
     Returns the catalog path. The catalog resolution procedure finds it as the single
@@ -354,7 +358,9 @@ def seed_catalog_sources(xorq_bin, proj: Path, names) -> Path:
 
 
 @pytest.fixture
-def run_claude(claude_bin, claude_auth, claude_project, tmp_path):
+def run_claude(
+    claude_bin: str, claude_auth: object, claude_project: Path, tmp_path: Path
+) -> Iterator[Callable[..., ClaudeRun]]:
     """Returns ``run(prompt, *, env_extra=None, timeout=300) -> ClaudeRun``.
 
     Each call runs ``claude -p`` headless with the xorq plugin loaded and xorq/CLAUDE.md
@@ -431,16 +437,16 @@ def _catalog_dirs(root: Path) -> list:
     return out
 
 
-def _xq(xorq_bin, *args, timeout=180):
+def _xq(xorq_bin: str, *args: object, timeout: int = 180) -> subprocess.CompletedProcess:
     return subprocess.run([xorq_bin, *args], capture_output=True, text=True, timeout=timeout)
 
 
-def catalog_kinds(xorq_bin, cat: Path) -> str:
+def catalog_kinds(xorq_bin: str, cat: Path) -> str:
     """stdout of ``xorq catalog -p <cat> list --kind`` (rows look like ``<hash>\\tsource``)."""
     return _xq(xorq_bin, "catalog", "-p", str(cat), "list", "--kind").stdout
 
 
-def source_hashes(xorq_bin, cat: Path) -> list:
+def source_hashes(xorq_bin: str, cat: Path) -> list:
     """Content hashes of every ``source`` entry in a catalog (``list`` shows hashes)."""
     out = []
     for line in catalog_kinds(xorq_bin, cat).splitlines():
@@ -450,19 +456,19 @@ def source_hashes(xorq_bin, cat: Path) -> list:
     return out
 
 
-def source_entries(xorq_bin, run: ClaudeRun) -> list:
+def source_entries(xorq_bin: str, run: ClaudeRun) -> list:
     """Every (catalog, hash) source entry the model created, across all places a
     catalog might land (repo-local in the project, or named under the isolated XDG home)."""
     cats = sorted({d for root in run.catalog_search_dirs if root.exists() for d in _catalog_dirs(root)})
     return [(cat, h) for cat in cats for h in source_hashes(xorq_bin, cat)]
 
 
-def entry_schema(xorq_bin, cat: Path, ident: str) -> dict:
+def entry_schema(xorq_bin: str, cat: Path, ident: str) -> dict:
     """The stored ``schema_out`` ({name: type}) of a catalog entry — metadata, no execution."""
     return json.loads(_xq(xorq_bin, "catalog", "-p", str(cat), "schema", ident, "--json").stdout)["schema_out"]
 
 
-def catalog_run_rows(xorq_bin, cat: Path, ident: str, limit=3) -> list:
+def catalog_run_rows(xorq_bin: str, cat: Path, ident: str, limit: int = 3) -> list:
     """Run an entry by hash/alias in the current venv (offline) and return JSON rows."""
     r = _xq(
         xorq_bin, "catalog", "-p", str(cat), "run", ident,
@@ -477,18 +483,18 @@ def file_schema(path: Path) -> dict:
     This is exactly the schema an ingested source entry for that file must have,
     so the LLM tests derive their expectations from the fixtures (no drift) and compare.
     """
-    import xorq.api as xo
-
     path = Path(path)
     read = xo.deferred_read_parquet if path.suffix == ".parquet" else xo.deferred_read_csv
     return {n: str(t) for n, t in read(str(path.resolve())).schema().items()}
 
 
-def _canon(schema: dict, types: bool):
+def _canon(schema: dict, types: bool) -> tuple:
     return tuple(sorted(schema.items())) if types else tuple(sorted(schema))
 
 
-def assert_sources(xorq_bin, run: ClaudeRun, expected_schemas: list, *, types=True, run_one=True):
+def assert_sources(
+    xorq_bin: str, run: ClaudeRun, expected_schemas: list, *, types: bool = True, run_one: bool = True
+) -> None:
     """Assert the model produced exactly one source entry per expected schema.
 
     ``expected_schemas`` is a list of {name: type} dicts (one per file the prompt implies);
@@ -498,8 +504,6 @@ def assert_sources(xorq_bin, run: ClaudeRun, expected_schemas: list, *, types=Tr
     executes one entry to prove the pipeline runs (skip where ``catalog run`` can't, e.g.
     materialized DuckDB in 0.3.28).
     """
-    from collections import Counter
-
     entries = source_entries(xorq_bin, run)
     assert entries, f"no source entry created\nclaude said: {run.said}"
     got = [entry_schema(xorq_bin, cat, h) for cat, h in entries]
@@ -519,7 +523,7 @@ def assert_sources(xorq_bin, run: ClaudeRun, expected_schemas: list, *, types=Tr
 # --- composer outcome assertions: derived (composed/expr) entries + flexible value checks ---
 
 
-def derived_entries(xorq_bin, run: ClaudeRun) -> list:
+def derived_entries(xorq_bin: str, run: ClaudeRun) -> list:
     """(catalog, hash) for every ``composed`` or ``expr`` entry the model created.
 
     Either kind counts: single-source shaping lands as ``composed``; a multi-source join
@@ -536,7 +540,7 @@ def derived_entries(xorq_bin, run: ClaudeRun) -> list:
     return out
 
 
-def assert_grouped(rows: list, expected: dict, *, tol=0.02):
+def assert_grouped(rows: list, expected: dict, *, tol: float = 0.02) -> None:
     """Assert a grouped aggregation, tolerant of model-chosen column names.
 
     Find the key column whose value-set covers ``expected``'s keys, then assert some
@@ -558,7 +562,7 @@ def assert_grouped(rows: list, expected: dict, *, tol=0.02):
     raise AssertionError(f"no measure column matches {expected}\ncols={list(rows[0])}\nrows={rows}")
 
 
-def assert_argmax(rows: list, expected_top):
+def assert_argmax(rows: list, expected_top: object) -> None:
     """Assert the label with the largest numeric measure equals ``expected_top``.
 
     Robust to whether the model returned a sorted full table or just the top row, and to
@@ -571,7 +575,7 @@ def assert_argmax(rows: list, expected_top):
     assert str(expected_top) in cands, f"expected top {expected_top!r}, argmax candidates {cands}\nrows={rows}"
 
 
-def assert_derived(xorq_bin, run: ClaudeRun, check, *, limit=60):
+def assert_derived(xorq_bin: str, run: ClaudeRun, check: Callable, *, limit: int = 60) -> None:
     """Find a derived entry whose run satisfies ``check(rows)``; fail with claude's words."""
     ent = derived_entries(xorq_bin, run)
     assert ent, f"no composed/expr entry created\nclaude said: {run.said}"
@@ -597,7 +601,7 @@ def assert_derived(xorq_bin, run: ClaudeRun, check, *, limit=60):
 # runs an entry through the skill's `-c 'source.ls.builder.<method>(...)'` round-trip path.
 
 
-def entries_by_kind(xorq_bin, run: ClaudeRun, kinds) -> list:
+def entries_by_kind(xorq_bin: str, run: ClaudeRun, kinds: Iterable[str]) -> list:
     """(catalog, hash) for every entry whose ``list --kind`` kind is in ``kinds``."""
     kinds = set(kinds)
     out = []
@@ -610,12 +614,14 @@ def entries_by_kind(xorq_bin, run: ClaudeRun, kinds) -> list:
     return out
 
 
-def builder_entries(xorq_bin, run: ClaudeRun) -> list:
+def builder_entries(xorq_bin: str, run: ClaudeRun) -> list:
     """(catalog, hash) for every ``expr_builder`` entry the model created."""
     return entries_by_kind(xorq_bin, run, ("expr_builder",))
 
 
-def assert_entry_runs(xorq_bin, run: ClaudeRun, check, *, kinds, limit=200):
+def assert_entry_runs(
+    xorq_bin: str, run: ClaudeRun, check: Callable, *, kinds: Iterable[str], limit: int = 200
+) -> None:
     """Find an entry of one of ``kinds`` whose run satisfies ``check(rows)``; fail with claude's words."""
     ents = entries_by_kind(xorq_bin, run, kinds)
     assert ents, f"no entry of kinds {tuple(kinds)} created\nclaude said: {run.said}"
@@ -642,7 +648,7 @@ def assert_entry_runs(xorq_bin, run: ClaudeRun, check, *, kinds, limit=200):
 # catalog), AND the seeded catalog must be unchanged (the skill added/removed nothing).
 
 
-def assert_answer_mentions(run: ClaudeRun, *needles, min_hits=None):
+def assert_answer_mentions(run: ClaudeRun, *needles: object, min_hits: int | None = None) -> None:
     """Assert the model's answer names each needle (case-insensitive).
 
     ``min_hits`` relaxes "all" to "at least N" where some summarization is acceptable
@@ -657,14 +663,14 @@ def assert_answer_mentions(run: ClaudeRun, *needles, min_hits=None):
     )
 
 
-def catalog_snapshot(xorq_bin, cat: Path):
+def catalog_snapshot(xorq_bin: str, cat: Path) -> tuple:
     """(entries, aliases) of a catalog — to prove a read-only skill mutated nothing."""
     kinds = tuple(sorted(catalog_kinds(xorq_bin, cat).splitlines()))
     aliases = tuple(sorted(_xq(xorq_bin, "catalog", "-p", str(cat), "list-aliases").stdout.splitlines()))
     return (kinds, aliases)
 
 
-def assert_read_only(xorq_bin, cat: Path, before):
+def assert_read_only(xorq_bin: str, cat: Path, before: tuple) -> None:
     """Assert the catalog's entry/alias set is identical to ``before`` (explore must not mutate)."""
     after = catalog_snapshot(xorq_bin, cat)
     assert after == before, (

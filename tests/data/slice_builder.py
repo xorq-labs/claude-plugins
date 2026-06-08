@@ -31,13 +31,13 @@ TAG = "text_slice"
 class TextSlice:
     """Slice ``which`` ('first' or 'last') ``n`` characters of ``column`` on ``table``."""
 
-    def __init__(self, table, column, which="first", n=3):
+    def __init__(self, table: object, column: str, which: str = "first", n: int = 3) -> None:
         self.table = table
         self.column = column
         self.which = which
         self.n = n
 
-    def build(self):
+    def build(self) -> object:
         """Return the sliced expression, tagged so it round-trips as an ExprBuilder."""
         col = self.table[self.column]
         sliced = col.substr(0, self.n) if self.which == "first" else col.substr(col.length() - self.n, self.n)
@@ -45,12 +45,12 @@ class TextSlice:
             TAG, column=self.column, which=self.which, n=self.n
         )
 
-    def with_which(self, which):
+    def with_which(self, which: str) -> TextSlice:
         """Return a sibling builder with the other option (e.g. ``"last"``)."""
         return TextSlice(self.table, self.column, which=which, n=self.n)
 
 
-def _from_tag_node(node):
+def _from_tag_node(node: object) -> TextSlice:
     return TextSlice(
         node.parent.to_expr(),
         node.metadata["column"],

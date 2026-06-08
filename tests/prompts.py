@@ -14,6 +14,8 @@ agent-success tests (we don't retest xorq). The rest are scaffolding so adding t
 skills (composer, ml, …) later is a one-liner.
 """
 
+from __future__ import annotations
+
 from enum import StrEnum
 
 

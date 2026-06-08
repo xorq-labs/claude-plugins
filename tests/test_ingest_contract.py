@@ -19,11 +19,14 @@ only on the file(s) it needs.
 the network). Verified against xorq 0.3.28.
 """
 
+from __future__ import annotations
+
 import json
 import subprocess
 from pathlib import Path
 
 import pytest
+from xorq.vendor.ibis.backends.profiles import Profile, check_for_exposed_secrets
 
 from conftest import build_duckdb_db, build_sqlite_db
 
@@ -31,17 +34,17 @@ REPO = Path(__file__).resolve().parent.parent
 DATA = REPO / "tests" / "data"
 
 
-def _need(*names):
+def _need(*names: str) -> None:
     missing = [n for n in names if not (DATA / n).exists()]
     if missing:
         pytest.skip(f"missing tests/data: {', '.join(missing)}")
 
 
-def _run(xorq_bin, *args):
+def _run(xorq_bin: str, *args: object) -> subprocess.CompletedProcess:
     return subprocess.run([xorq_bin, *args], capture_output=True, text=True)
 
 
-def _build(xorq_bin, tmp_path, script_src):
+def _build(xorq_bin: str, tmp_path: Path, script_src: str) -> Path:
     """Write an ingest script, build it, return the build directory Path."""
     (tmp_path / "ingest.py").write_text(script_src)
     bp = tmp_path / "bp.txt"
@@ -54,7 +57,7 @@ def _build(xorq_bin, tmp_path, script_src):
     return Path(bp.read_text().strip())
 
 
-def _add(xorq_bin, tmp_path, build_path, alias):
+def _add(xorq_bin: str, tmp_path: Path, build_path: Path, alias: str) -> Path:
     cat = tmp_path / "cat"
     if not (cat / "catalog.yaml").exists():
         _run(xorq_bin, "catalog", "-p", str(cat), "init")
@@ -63,11 +66,11 @@ def _add(xorq_bin, tmp_path, build_path, alias):
     return cat
 
 
-def _kinds(xorq_bin, cat):
+def _kinds(xorq_bin: str, cat: Path) -> str:
     return _run(xorq_bin, "catalog", "-p", str(cat), "list", "--kind").stdout
 
 
-def _rows(xorq_bin, build_path, limit=3):
+def _rows(xorq_bin: str, build_path: Path, limit: int = 3) -> list:
     r = _run(xorq_bin, "run", str(build_path), "-o", "-", "-f", "json", "--limit", str(limit))
     assert r.returncode == 0, r.stderr
     return [json.loads(line) for line in r.stdout.splitlines() if line.strip().startswith("{")]
@@ -76,19 +79,19 @@ def _rows(xorq_bin, build_path, limit=3):
 # --- source DBs built ONCE per session from the CSVs (single source of truth) ---
 
 @pytest.fixture(scope="session")
-def sqlite_db(tmp_path_factory):
+def sqlite_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
     _need("customers.csv")
     return build_sqlite_db(tmp_path_factory.mktemp("sqlite") / "app.db")
 
 
 @pytest.fixture(scope="session")
-def duckdb_db(tmp_path_factory):
+def duckdb_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
     pytest.importorskip("duckdb")
     _need("customers.csv")
     return build_duckdb_db(tmp_path_factory.mktemp("duckdb") / "warehouse.duckdb")
 
 
-def test_ingest_csv_creates_source_and_runs(xorq_bin, tmp_path):
+def test_ingest_csv_creates_source_and_runs(xorq_bin: str, tmp_path: Path) -> None:
     _need("customers.csv")
     build = _build(xorq_bin, tmp_path, f'import xorq.api as xo\nexpr = xo.deferred_read_csv({str(DATA / "customers.csv")!r})\n')
     cat = _add(xorq_bin, tmp_path, build, "customers_csv")
@@ -97,7 +100,7 @@ def test_ingest_csv_creates_source_and_runs(xorq_bin, tmp_path):
     assert rows and "customer_id" in rows[0]
 
 
-def test_ingest_parquet_creates_source_and_runs(xorq_bin, tmp_path):
+def test_ingest_parquet_creates_source_and_runs(xorq_bin: str, tmp_path: Path) -> None:
     _need("events_dev.parquet")
     build = _build(xorq_bin, tmp_path, f'import xorq.api as xo\nexpr = xo.deferred_read_parquet({str(DATA / "events_dev.parquet")!r})\n')
     cat = _add(xorq_bin, tmp_path, build, "events_parquet")
@@ -106,7 +109,7 @@ def test_ingest_parquet_creates_source_and_runs(xorq_bin, tmp_path):
     assert rows and "event_id" in rows[0]
 
 
-def test_ingest_sqlite_embeds_profile_and_runs(xorq_bin, tmp_path, sqlite_db):
+def test_ingest_sqlite_embeds_profile_and_runs(xorq_bin: str, tmp_path: Path, sqlite_db: Path) -> None:
     build = _build(
         xorq_bin, tmp_path,
         f'import xorq.api as xo\ncon = xo.sqlite.connect({str(sqlite_db)!r})\nexpr = con.table("customers")\n',
@@ -118,7 +121,7 @@ def test_ingest_sqlite_embeds_profile_and_runs(xorq_bin, tmp_path, sqlite_db):
     assert _rows(xorq_bin, build)[0]["customer_id"] == 1
 
 
-def test_ingest_duckdb_materializes_and_runs(xorq_bin, tmp_path, duckdb_db):
+def test_ingest_duckdb_materializes_and_runs(xorq_bin: str, tmp_path: Path, duckdb_db: Path) -> None:
     build = _build(
         xorq_bin, tmp_path,
         f'import xorq.api as xo\ncon = xo.duckdb.connect({str(duckdb_db)!r})\nexpr = con.table("customers")\n',
@@ -131,10 +134,8 @@ def test_ingest_duckdb_materializes_and_runs(xorq_bin, tmp_path, duckdb_db):
     assert _rows(xorq_bin, build)[0]["customer_id"] == 1
 
 
-def test_postgres_profile_stores_env_refs_not_secrets():
+def test_postgres_profile_stores_env_refs_not_secrets() -> None:
     """The secure-secrets guarantee the skill relies on — no server needed."""
-    from xorq.vendor.ibis.backends.profiles import Profile, check_for_exposed_secrets
-
     safe = Profile(con_name="postgres", kwargs_tuple=(
         ("host", "${POSTGRES_HOST}"), ("port", 5432), ("database", "xorq"),
         ("user", "${POSTGRES_USER}"), ("password", "${POSTGRES_PASSWORD}"),

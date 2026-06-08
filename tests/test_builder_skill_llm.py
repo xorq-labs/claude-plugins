@@ -24,7 +24,11 @@ Two deliberate assertion choices:
 Opt-in only: ``pytest -m llm``. Skips cleanly without claude / auth / fixture data.
 """
 
+from __future__ import annotations
+
 import json
+from collections.abc import Callable
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -44,7 +48,7 @@ from prompts import Builder
 pytestmark = pytest.mark.llm
 
 
-def test_llm_builder_category_spend(xorq_bin, claude_project, run_claude):
+def test_llm_builder_category_spend(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """Semantic model on transactions -> total spend per category (an expr_builder entry)."""
     seed_catalog_sources(xorq_bin, claude_project, ["transactions"])
     run = run_claude(Builder.CATEGORY_SPEND)
@@ -57,7 +61,7 @@ def test_llm_builder_category_spend(xorq_bin, claude_project, run_claude):
     )
 
 
-def test_llm_builder_spend_by_tier_join(xorq_bin, claude_project, run_claude):
+def test_llm_builder_spend_by_tier_join(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """Semantic model with join_one (each transaction -> its one customer) -> spend per tier."""
     seed_catalog_sources(xorq_bin, claude_project, ["transactions", "customers"])
     run = run_claude(Builder.SPEND_BY_TIER)
@@ -72,14 +76,14 @@ def test_llm_builder_spend_by_tier_join(xorq_bin, claude_project, run_claude):
     )
 
 
-def _prediction_columns(row):
+def _prediction_columns(row: dict) -> list:
     return [
         c for c in row
         if "predict" in c.lower() or c.lower() in ("prediction", "score", "label", "predicted", "proba")
     ]
 
 
-def test_llm_builder_ml_predict(xorq_bin, claude_project, run_claude):
+def test_llm_builder_ml_predict(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """Fitted pipeline: train on dev events, catalog it, recover via .ls.builder, score prod.
 
     Schema + round-trip determinism (NOT accuracy — the fixture has no signal for "is purchase",
@@ -123,7 +127,7 @@ def test_llm_builder_ml_predict(xorq_bin, claude_project, run_claude):
     )
 
 
-def test_llm_builder_custom_textslice(xorq_bin, claude_project, run_claude):
+def test_llm_builder_custom_textslice(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """Custom builder round-trip: build first-3 chars of product_id, recover the builder, do last-3.
 
     A trivial custom builder is PROVIDED (tests/data/slice_builder.py, seeded into the project) so

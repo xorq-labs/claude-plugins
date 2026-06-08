@@ -19,6 +19,8 @@ Pins SKILL.md §B (build -> add -> ``expr_builder``) and §A (``run -c
 data is absent.
 """
 
+from __future__ import annotations
+
 import json
 import subprocess
 from pathlib import Path
@@ -46,14 +48,14 @@ expr = model.query(dimensions=("category",), measures=("total_amount", "txn_coun
 """
 
 
-def _run(xorq_bin, *args, timeout=300):
+def _run(xorq_bin: str, *args: object, timeout: int = 300) -> subprocess.CompletedProcess:
     return subprocess.run(
         [xorq_bin, *map(str, args)], capture_output=True, text=True, timeout=timeout
     )
 
 
 @pytest.fixture(scope="module")
-def builder_entry(xorq_bin, tmp_path_factory):
+def builder_entry(xorq_bin: str, tmp_path_factory: pytest.TempPathFactory) -> tuple:
     """Build the BSL `.to_tagged()` script and add it once; return (catalog, alias). SKILL.md §B."""
     if not CSV.exists():
         pytest.skip("missing tests/data/transactions.csv")
@@ -72,7 +74,7 @@ def builder_entry(xorq_bin, tmp_path_factory):
     return cat, "sem-by-category"
 
 
-def test_build_yields_expr_builder_entry(xorq_bin, builder_entry):
+def test_build_yields_expr_builder_entry(xorq_bin: str, builder_entry: tuple) -> None:
     """§B: a `.to_tagged()` build + `catalog add` is kind `expr_builder`, and `show` reports the
     builder type."""
     cat, alias = builder_entry
@@ -83,7 +85,7 @@ def test_build_yields_expr_builder_entry(xorq_bin, builder_entry):
     assert "semantic_model" in show, show  # the builder type, in the "Builders:" block
 
 
-def test_cli_round_trip_recovers_and_requeries(xorq_bin, builder_entry):
+def test_cli_round_trip_recovers_and_requeries(xorq_bin: str, builder_entry: tuple) -> None:
     """§A (flagship example): `run -c 'source.ls.builder.query(...).to_tagged()'` recovers the
     SemanticModel and re-queries it with a different selection -> rows."""
     cat, alias = builder_entry

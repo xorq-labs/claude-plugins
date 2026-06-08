@@ -9,7 +9,12 @@ accurate.
 Each test names the exact CLAUDE.md claim it pins. Verified against xorq 0.3.28.
 """
 
+from __future__ import annotations
+
 import subprocess
+from pathlib import Path
+
+from conftest import XorqCli
 
 
 # --- Ambient default precedence: env var > config file > built-in "default" ---
@@ -18,7 +23,7 @@ import subprocess
 # 3. built-in 'default'."
 
 
-def test_default_clean_is_builtin(xorq):
+def test_default_clean_is_builtin(xorq: XorqCli) -> None:
     """No env var and no config file -> falls through to built-in 'default'."""
     r = xorq.run("catalog", "default")
     assert r.code == 0, r.output
@@ -26,7 +31,7 @@ def test_default_clean_is_builtin(xorq):
     assert "source: built-in" in r.output
 
 
-def test_default_set_persists_to_config_file(xorq):
+def test_default_set_persists_to_config_file(xorq: XorqCli) -> None:
     """`catalog default --set` writes ~/.config/xorq/catalog-default and is reported as the source."""
     assert not xorq.catalog_default_file.exists()
 
@@ -40,7 +45,7 @@ def test_default_set_persists_to_config_file(xorq):
     assert "source: config" in r.output
 
 
-def test_env_var_overrides_config_file(xorq):
+def test_env_var_overrides_config_file(xorq: XorqCli) -> None:
     """XORQ_DEFAULT_CATALOG wins even when a config-file default is set (env > config)."""
     xorq.run("catalog", "default", "--set", "foo")  # config says 'foo'
 
@@ -50,7 +55,7 @@ def test_env_var_overrides_config_file(xorq):
     assert "source: env" in r.output
 
 
-def test_default_unset_reverts_to_builtin(xorq):
+def test_default_unset_reverts_to_builtin(xorq: XorqCli) -> None:
     """`--unset` removes the config file and resolution reverts to built-in 'default'."""
     xorq.run("catalog", "default", "--set", "foo")
     assert xorq.catalog_default_file.exists()
@@ -70,20 +75,20 @@ def test_default_unset_reverts_to_builtin(xorq):
 # (clone destination); -r requires exactly one of -n/-u and cannot combine with -p."
 
 
-def test_name_and_path_are_mutually_exclusive(xorq):
+def test_name_and_path_are_mutually_exclusive(xorq: XorqCli) -> None:
     r = xorq.run("catalog", "-n", "a", "-p", "b", "list", "--kind")
     assert r.code != 0
     assert "mutually exclusive" in r.output
 
 
-def test_name_and_url_are_mutually_exclusive(xorq):
+def test_name_and_url_are_mutually_exclusive(xorq: XorqCli) -> None:
     """CLAUDE.md: `-n` and `-u` are mutually exclusive (can't name a clone target)."""
     r = xorq.run("catalog", "-n", "a", "-u", "https://example.com/r.git", "list", "--kind")
     assert r.code != 0
     assert "mutually exclusive" in r.output
 
 
-def test_root_repo_requires_name_or_url(xorq, tmp_path):
+def test_root_repo_requires_name_or_url(xorq: XorqCli, tmp_path: Path) -> None:
     """CLAUDE.md: `-r` must pair with exactly one of `-n`/`-u`, never `-p`.
 
     `-r`'s root is opened as a git repo, so it must be one (git init); pairing it with `-p`
@@ -97,7 +102,7 @@ def test_root_repo_requires_name_or_url(xorq, tmp_path):
     assert "exactly one of" in r.output  # "...provide exactly one of `name` or `url`..."
 
 
-def test_group_flags_must_precede_the_subcommand(xorq, tmp_path):
+def test_group_flags_must_precede_the_subcommand(xorq: XorqCli, tmp_path: Path) -> None:
     """`-p` is a GROUP flag: accepted before the subcommand, rejected after it."""
     missing = tmp_path / "nope"
 
@@ -116,7 +121,7 @@ def test_group_flags_must_precede_the_subcommand(xorq, tmp_path):
 # CLAUDE.md: "The CLI does not auto-create catalogs; you init them explicitly."
 
 
-def test_missing_catalog_is_not_autocreated(xorq, tmp_path):
+def test_missing_catalog_is_not_autocreated(xorq: XorqCli, tmp_path: Path) -> None:
     missing = tmp_path / "nope"
     r = xorq.run("catalog", "-p", str(missing), "list", "--kind")
     assert r.code != 0
@@ -129,7 +134,7 @@ def test_missing_catalog_is_not_autocreated(xorq, tmp_path):
 # CLAUDE.md locations table: "Named catalogs root -> ~/.local/share/xorq/catalogs/<name>".
 
 
-def test_named_catalog_lives_under_xdg_data_home(xorq):
+def test_named_catalog_lives_under_xdg_data_home(xorq: XorqCli) -> None:
     r = xorq.run("catalog", "-n", "mycat", "init")
     assert r.code == 0, r.output
     assert (xorq.named_catalog_dir("mycat") / "catalog.yaml").exists()

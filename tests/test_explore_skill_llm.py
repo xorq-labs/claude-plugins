@@ -17,6 +17,11 @@ Opt-in only: ``pytest -m llm``. Skips cleanly when ``claude`` isn't installed, w
 auth (ANTHROPIC_API_KEY / ~/.claude), or when the fixture data is absent.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -34,7 +39,7 @@ pytestmark = pytest.mark.llm
 SEEDED = ["customers", "products", "transactions"]
 
 
-def test_llm_explore_list(xorq_bin, claude_project, run_claude):
+def test_llm_explore_list(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """"What's in my catalog?" -> the answer names every seeded entry; nothing is mutated."""
     cat = seed_catalog_sources(xorq_bin, claude_project, SEEDED)
     before = catalog_snapshot(xorq_bin, cat)
@@ -43,7 +48,7 @@ def test_llm_explore_list(xorq_bin, claude_project, run_claude):
     assert_read_only(xorq_bin, cat, before)     # explore added/removed nothing
 
 
-def test_llm_explore_schema(xorq_bin, claude_project, run_claude):
+def test_llm_explore_schema(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """One entry seeded -> "what columns?" makes the model inspect its schema and report it."""
     cat = seed_catalog_sources(xorq_bin, claude_project, ["customers"])
     before = catalog_snapshot(xorq_bin, cat)

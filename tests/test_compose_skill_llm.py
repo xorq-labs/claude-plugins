@@ -17,6 +17,11 @@ Two prompt classes, one intent ("derive a new entry from the catalog"):
 Opt-in only: ``pytest -m llm``. Skips cleanly without claude / auth / fixture data.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -35,7 +40,7 @@ pytestmark = pytest.mark.llm
 # --- single-source shaping -> `catalog compose` -> composed ---
 
 
-def test_llm_compose_per_tier(xorq_bin, claude_project, run_claude):
+def test_llm_compose_per_tier(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """customers -> count per tier."""
     seed_catalog_sources(xorq_bin, claude_project, ["customers"])
     run = run_claude(Compose.PER_TIER)
@@ -43,7 +48,7 @@ def test_llm_compose_per_tier(xorq_bin, claude_project, run_claude):
     assert_derived(xorq_bin, run, lambda rows: assert_grouped(rows, expected))
 
 
-def test_llm_compose_top_category(xorq_bin, claude_project, run_claude):
+def test_llm_compose_top_category(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """transactions -> the category with the most revenue (argmax)."""
     seed_catalog_sources(xorq_bin, claude_project, ["transactions"])
     run = run_claude(Compose.TOP_CATEGORY)
@@ -54,7 +59,7 @@ def test_llm_compose_top_category(xorq_bin, claude_project, run_claude):
 # --- multi-source join -> build script (compose is single-input) -> expr ---
 
 
-def test_llm_compose_spend_by_tier(xorq_bin, claude_project, run_claude):
+def test_llm_compose_spend_by_tier(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """transactions x customers (customer_id) -> total spend per tier."""
     seed_catalog_sources(xorq_bin, claude_project, ["transactions", "customers"])
     run = run_claude(Compose.SPEND_BY_TIER)
@@ -65,7 +70,7 @@ def test_llm_compose_spend_by_tier(xorq_bin, claude_project, run_claude):
     assert_derived(xorq_bin, run, lambda rows: assert_grouped(rows, expected))
 
 
-def test_llm_compose_free_fave(xorq_bin, claude_project, run_claude):
+def test_llm_compose_free_fave(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
     """transactions x customers, free tier -> top spending category (argmax)."""
     seed_catalog_sources(xorq_bin, claude_project, ["transactions", "customers"])
     run = run_claude(Compose.FREE_FAVE)
