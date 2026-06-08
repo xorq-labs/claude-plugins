@@ -155,9 +155,9 @@ def build_duckdb_db(dest: Path) -> Path:
 PLUGIN_DIR = REPO / "xorq"
 CLAUDE_MD = PLUGIN_DIR / "CLAUDE.md"
 
-# The only steer we inject: headless `-p` has no human, but the init skill's Step 0
-# tells the model to *ask* how to resolve the catalog when none exists. This removes
-# that one blocker — it does NOT tell the model how to ingest.
+# The only steer we inject: headless `-p` has no human, but CLAUDE.md's Catalog
+# Resolution (Step 0) tells the model to *ask* how to resolve the catalog when none
+# exists. This removes that one blocker — it does NOT tell the model how to ingest.
 STEER = (
     "Non-interactive session: when a skill would ask the user a question, pick the "
     "recommended default and proceed without asking. For catalog resolution, create a "
@@ -207,6 +207,11 @@ class ClaudeRun:
         prefix = "[session ended on is_error] " if self.is_error else ""
         return prefix + str(self.result.get("result", ""))[:1500]
 
+    @property
+    def answer(self) -> str:
+        """The model's full final text (untruncated) — what a read-only skill is judged on."""
+        return str(self.result.get("result", ""))
+
 
 @pytest.fixture(scope="session")
 def claude_bin():
@@ -225,7 +230,7 @@ def claude_auth():
 
 @pytest.fixture
 def claude_project(tmp_path):
-    """A clean, wheel-buildable tmp project dir the init skill treats as repo-local.
+    """A clean, wheel-buildable tmp project dir the ingest skill treats as repo-local.
 
     Bare on purpose: only pyproject.toml + lockfile (so ``xorq catalog add`` can build a
     wheel) and NO catalog.yaml (so resolution creates a fresh repo-local catalog). Each
@@ -264,6 +269,72 @@ def seed_duckdb(proj: Path) -> Path:
     """Create ``proj/warehouse.duckdb`` with a customers table from customers.csv."""
     need_data("customers.csv")
     return build_duckdb_db(proj / "warehouse.duckdb")
+
+
+# ---------------------------------------------------------------------------
+# Deterministic catalog seeding for the composer e2e
+#
+# Stand up a repo-local catalog with the source files ALREADY added (alias == key),
+# so the composer LLM run resolves it and composes on top — we don't retest ingest.
+# CSV / parquet only (deferred_read_*); no DB backends are involved here.
+# ---------------------------------------------------------------------------
+
+SOURCES = {  # alias -> tests/data file
+    "customers": "customers.csv",
+    "products": "products.csv",
+    "transactions": "transactions.csv",
+    "metrics": "metrics.parquet",
+    "events_dev": "events_dev.parquet",
+    "events_prod": "events_prod.parquet",
+}
+
+
+def _seed(xorq_bin, proj: Path, *args):
+    """Run xorq in ``proj`` (wheel-buildable) for deterministic seeding; fail loudly.
+
+    HOME stays real (warm uv cache); git identity is forced via env so ``catalog init``'s
+    commit succeeds even where HOME has no .gitconfig (CI); xorq state (XDG + parquet cache)
+    is isolated so the seed is safe under ``pytest -n``.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "XORQ_DEFAULT_CATALOG"}
+    env.setdefault("GIT_AUTHOR_NAME", "xorq seed")
+    env.setdefault("GIT_AUTHOR_EMAIL", "seed@xorq.dev")
+    env.setdefault("GIT_COMMITTER_NAME", "xorq seed")
+    env.setdefault("GIT_COMMITTER_EMAIL", "seed@xorq.dev")
+    home = proj / ".seed-home"
+    env["XDG_DATA_HOME"] = str(home / "data")
+    env["XDG_CONFIG_HOME"] = str(home / "config")
+    env["XORQ_CACHE_DIR"] = str(home / "cache")
+    r = subprocess.run(
+        [xorq_bin, *map(str, args)], cwd=str(proj), env=env,
+        capture_output=True, text=True, timeout=300,
+    )
+    assert r.returncode == 0, (
+        f"seed step failed: xorq {' '.join(map(str, args))}\n"
+        f"STDOUT:\n{r.stdout}\nSTDERR:\n{r.stderr}"
+    )
+    return r
+
+
+def seed_catalog_sources(xorq_bin, proj: Path, names) -> Path:
+    """Create a repo-local catalog in ``proj`` with the named sources added (alias == name).
+
+    Returns the catalog path. The catalog resolution procedure finds it as the single
+    repo-local candidate, so the composer LLM run composes on top of these entries.
+    """
+    data = seed_files(proj, *(SOURCES[n] for n in names))
+    cat = proj / f"{proj.name}-catalog"
+    _seed(xorq_bin, proj, "catalog", "-p", str(cat), "init")
+    for alias in names:
+        f = (data / SOURCES[alias]).resolve()
+        reader = "deferred_read_parquet" if f.suffix == ".parquet" else "deferred_read_csv"
+        script = proj / f"_seed_{alias}.py"
+        script.write_text(f"import xorq.api as xo\nexpr = xo.{reader}({str(f)!r})\n")
+        bp = proj / f"_bp_{alias}.txt"
+        _seed(xorq_bin, proj, "build", script.name,
+              "--builds-dir", "builds_source", "--emit-build-path-to", str(bp))
+        _seed(xorq_bin, proj, "catalog", "-p", str(cat), "add", bp.read_text().strip(), "-a", alias)
+    return cat
 
 
 @pytest.fixture
@@ -387,7 +458,7 @@ def catalog_run_rows(xorq_bin, cat: Path, ident: str, limit=3) -> list:
 def file_schema(path: Path) -> dict:
     """xorq's ``schema_out`` for a deferred read of a data file: {name: type_str}.
 
-    This is exactly the schema an ``init``-ingested source entry for that file must have,
+    This is exactly the schema an ingested source entry for that file must have,
     so the LLM tests derive their expectations from the fixtures (no drift) and compare.
     """
     import xorq.api as xo
@@ -427,3 +498,113 @@ def assert_sources(xorq_bin, run: ClaudeRun, expected_schemas: list, *, types=Tr
         cat, h = entries[0]
         assert catalog_run_rows(xorq_bin, cat, h), \
             f"source {h} produced no rows\nclaude said: {run.said}"
+
+
+# --- composer outcome assertions: derived (composed/expr) entries + flexible value checks ---
+
+
+def derived_entries(xorq_bin, run: ClaudeRun) -> list:
+    """(catalog, hash) for every ``composed`` or ``expr`` entry the model created.
+
+    Either kind counts: single-source shaping lands as ``composed``; a multi-source join
+    (compose is single-input) lands as ``expr``. Source entries (the seeded inputs) are
+    excluded — we only want the derived results.
+    """
+    out = []
+    cats = sorted({d for root in run.catalog_search_dirs if root.exists() for d in _catalog_dirs(root)})
+    for cat in cats:
+        for line in catalog_kinds(xorq_bin, cat).splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] in ("composed", "expr"):
+                out.append((cat, parts[0]))
+    return out
+
+
+def assert_grouped(rows: list, expected: dict, *, tol=0.02):
+    """Assert a grouped aggregation, tolerant of model-chosen column names.
+
+    Find the key column whose value-set covers ``expected``'s keys, then assert some
+    numeric measure column matches ``expected`` per group within relative tolerance — so
+    the model is free to name columns anything.
+    """
+    keys = set(map(str, expected))
+    keycols = [c for c in rows[0] if keys <= {str(r[c]) for r in rows}]
+    assert keycols, f"no column carries group keys {sorted(keys)}; cols={list(rows[0])}\nrows={rows[:6]}"
+    for kc in keycols:
+        by = {str(r[kc]): r for r in rows}
+        measures = [
+            c for c in rows[0]
+            if c != kc and all(isinstance(r.get(c), (int, float)) and not isinstance(r.get(c), bool) for r in rows)
+        ]
+        for mc in measures:
+            if all(abs(by[str(k)][mc] - v) <= abs(v) * tol + tol for k, v in expected.items()):
+                return
+    raise AssertionError(f"no measure column matches {expected}\ncols={list(rows[0])}\nrows={rows}")
+
+
+def assert_argmax(rows: list, expected_top):
+    """Assert the label with the largest numeric measure equals ``expected_top``.
+
+    Robust to whether the model returned a sorted full table or just the top row, and to
+    which measure it ranked by.
+    """
+    measures = [c for c in rows[0] if all(isinstance(r.get(c), (int, float)) and not isinstance(r.get(c), bool) for r in rows)]
+    labels = [c for c in rows[0] if c not in measures]
+    assert measures and labels, f"need a label + a measure column; cols={list(rows[0])}\nrows={rows}"
+    cands = {str(max(rows, key=lambda r: r[m])[l]) for l in labels for m in measures}
+    assert str(expected_top) in cands, f"expected top {expected_top!r}, argmax candidates {cands}\nrows={rows}"
+
+
+def assert_derived(xorq_bin, run: ClaudeRun, check, *, limit=60):
+    """Find a derived entry whose run satisfies ``check(rows)``; fail with claude's words."""
+    ent = derived_entries(xorq_bin, run)
+    assert ent, f"no composed/expr entry created\nclaude said: {run.said}"
+    last = None
+    for cat, h in ent:
+        rows = catalog_run_rows(xorq_bin, cat, h, limit=limit)
+        if not rows:
+            last = "entry produced no rows"
+            continue
+        try:
+            check(rows)
+            return
+        except AssertionError as e:
+            last = e
+    raise AssertionError(f"no derived entry matched expected\n  last: {last}\n  claude said: {run.said}")
+
+
+# --- catalog-explore outcome assertions: a read-only skill is judged on its ANSWER ---
+#
+# catalog-explore creates no artifact, so the contract is twofold: the model's reported
+# answer must name the right entries/columns (it could only know them by inspecting the
+# catalog), AND the seeded catalog must be unchanged (the skill added/removed nothing).
+
+
+def assert_answer_mentions(run: ClaudeRun, *needles, min_hits=None):
+    """Assert the model's answer names each needle (case-insensitive).
+
+    ``min_hits`` relaxes "all" to "at least N" where some summarization is acceptable
+    (e.g. a long column list); default requires every needle.
+    """
+    said = run.answer.lower()
+    hits = [n for n in needles if str(n).lower() in said]
+    need = len(needles) if min_hits is None else min_hits
+    assert len(hits) >= need, (
+        f"answer named {len(hits)}/{len(needles)} of {list(needles)} (need {need})\n"
+        f"claude said: {run.said}"
+    )
+
+
+def catalog_snapshot(xorq_bin, cat: Path):
+    """(entries, aliases) of a catalog — to prove a read-only skill mutated nothing."""
+    kinds = tuple(sorted(catalog_kinds(xorq_bin, cat).splitlines()))
+    aliases = tuple(sorted(_xq(xorq_bin, "catalog", "-p", str(cat), "list-aliases").stdout.splitlines()))
+    return (kinds, aliases)
+
+
+def assert_read_only(xorq_bin, cat: Path, before):
+    """Assert the catalog's entry/alias set is identical to ``before`` (explore must not mutate)."""
+    after = catalog_snapshot(xorq_bin, cat)
+    assert after == before, (
+        f"catalog changed — explore must be read-only\n  before: {before}\n  after:  {after}"
+    )

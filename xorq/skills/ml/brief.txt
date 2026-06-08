@@ -1,0 +1,8 @@
+ML — xorq's ML workflow (xorq.expr.ml): assemble an sklearn-style pipeline of steps,
+.fit() it over a catalogued expression -> FittedPipeline, then transform / predict /
+predict_proba / decision_function / feature_importances, and version the result in the
+catalog.
+
+Boundaries:
+- FittedPipeline is itself an ExprBuilder, but the generic tag machinery lives in
+  builder. This skill owns the MODEL workflow, not the type/extension layer.

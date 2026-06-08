@@ -8,10 +8,10 @@ not whether the model can follow a spelled-out recipe.
 `StrEnum` members *are* their string value, so a member can be passed straight to the
 CLI runner: `run_claude(IngestData.RAW)`.
 
-`IngestData` drives the `ingest` skill's LLM e2e (build path). The `init` skill (no-build
-acquire: clone / submodule / pull / replay / get+add) is covered by deterministic contract
-tests (test_init_contract.py); it has no LLM e2e yet — acquiring needs a published catalog
-to clone from. The rest are scaffolding so adding the other skills later is a one-liner.
+`IngestData` drives the `ingest` skill's LLM e2e (build path). Catalog acquire/copy
+(clone / pull / replay) is xorq's own machinery, not a skill — out of scope for these
+agent-success tests (we don't retest xorq). The rest are scaffolding so adding the other
+skills (composer, ml, …) later is a one-liner.
 """
 
 from enum import StrEnum
@@ -27,15 +27,33 @@ class IngestData(StrEnum):
 
 
 class ExploreCatalog(StrEnum):
-    """xorq:catalog-explore — discover and inspect entries (not yet wired)."""
+    """xorq:catalog-explore — discover and inspect catalogued entries, read-only.
+
+    The skill mutates nothing, so the e2e judges the model's ANSWER (does it name the right
+    entries / columns?) and separately asserts the seeded catalog is left untouched. Prompts
+    name no aliases or commands — with one entry seeded, "the data in my catalog" is unambiguous.
+    """
 
     LIST = "What's in my catalog?"
+    SCHEMA = "What columns does the data in my catalog have?"
 
 
 class Compose(StrEnum):
-    """xorq:composer — combine, transform, and run entries (not yet wired)."""
+    """xorq:composer — compose a new derived entry from catalogued expressions.
 
-    RUN = "Run the customers entry and show me a few rows."
+    Single-source prompts exercise `catalog compose` (-> a `composed` entry); the join
+    prompts force a build script since compose is single-input (-> an `expr` entry). Same
+    intent either way: "derive a new entry from what's in the catalog."
+    """
+
+    # single-source shaping -> `catalog compose` -> composed
+    BY_REGION = "From what's in my catalog, break down total revenue and order counts by region and save it as a new entry."
+    PER_TIER = "How many customers are in each tier? Save the breakdown to the catalog."
+    TOP_CATEGORY = "Which transaction category pulls in the most revenue? Add the answer to my catalog."
+
+    # multi-source join -> build script -> expr
+    SPEND_BY_TIER = "What's the total transaction spend for each customer tier? Save it as a new entry."
+    FREE_FAVE = "What do my free-tier customers spend the most on? Add the answer to the catalog."
 
 
 class Build(StrEnum):

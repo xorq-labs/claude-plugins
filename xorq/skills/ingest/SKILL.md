@@ -11,7 +11,7 @@ work can compose, run, and build on.
 
 > **Do you even need to build?** A catalog entry is built **once**, then distributed
 > git-style. If the data is already catalogued somewhere, *acquire* the entry instead —
-> clone / submodule / pull / replay, no build — see the **`init`** skill. Build (this
+> clone / pull / replay it, no build (that's xorq's own catalog machinery). Build (this
 > skill) only to **originate** a net-new `Source` that exists in no catalog yet.
 
 Every entry is created by the same CLI flow: **write a one-line ingest expression →

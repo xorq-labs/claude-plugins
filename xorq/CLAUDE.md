@@ -89,6 +89,38 @@ CI env) and every bare `xorq catalog` command in that session targets it — no 
 | Persisted default-name file | `~/.config/xorq/catalog-default` |
 | A repo-local catalog | wherever you `init` it with `-p <dir>` (e.g. `./<repo>-catalog`) |
 
+## Building expressions
+
+Every catalog entry bottoms out in one primitive: **`xorq build <script.py>` →
+`xorq catalog add <build-path> -a <alias>`**. Rung-1 CLIs (`catalog compose`, the `ingest`
+one-liners) run both steps for you. Construct the expression with the lightest tool that
+works, and **climb this ladder only as the task demands**:
+
+1. **CLI inline** *(prefer this)* — `xorq catalog compose <src> -c "source.filter(…)"`, or an
+   `ingest` `deferred_read_*` one-liner. No script; the CLI builds **and** catalogs.
+2. **`expr.*` helpers** *(a small build script, when inline can't express it):*
+   - `expr.cache()` (memoize a sub-result), `expr.into_backend(con)` (cross-engine),
+     `expr.sql("…")` (raw SQL), `expr.pipe(fn)` (apply a Python transform fn).
+   - `expr.unbind()` — generalize a *bound* expr into a reusable **`unbound_expr`** transform;
+     the on-ramp from code back to `compose`. (In the `compose` flow itself, binding is
+     internal — you never unbind by hand.)
+   - Check your work with `expr.ls`: **`expr.ls.kind`** (which `ExprKind` will `catalog add`
+     record — `source` / `expr` / `unbound_expr` / `composed` / `expr_builder`?),
+     `expr.ls.tokenized` (the content-address hash), `expr.ls.backends` / `is_multiengine`,
+     `expr.ls.composed_from` / `builder` / `pipeline(s)` (recover provenance / objects).
+3. **From scratch** *(max complexity)* — graph surgery: `expr.ls.fused` / `unwrapped` /
+   `untagged` strip catalog/cache wrappers; then `walk_nodes` / `replace_unbound`.
+
+Skills lead with their rung-1 form and point here for anything richer — don't re-teach
+`expr.ls` per skill.
+
+The same introspection on a **catalogued entry**, read straight from the git-tracked sidecar
+(cheap, always-local — no archive load or annex fetch): `cat.get_catalog_entry(name,
+maybe_alias=True)` exposes `e.kind` / `e.columns` / `e.backends` / `e.composed_from` /
+`e.is_content_local` / `e.metadata` (`.schema_in` / `.schema_out` / `.params` / `.root_tag`) /
+`e.sidecar_metadata`, where `e.expr.ls.*` would load the archive (and fetch annex content).
+The CLI mirror — `xorq catalog list / show / schema` — is the **catalog-explore** skill.
+
 ## Environment Variables
 
 | Variable | Purpose | Default |
