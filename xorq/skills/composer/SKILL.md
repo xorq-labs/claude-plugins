@@ -23,7 +23,8 @@ xorq catalog -p "$CAT" compose <source> [<transform> …] [-c "<inline expr>"] -
 ## Resolve the catalog
 
 Run the **Catalog Resolution** procedure in `xorq/CLAUDE.md` first, then thread the target
-on every call (`-p <path>` or `-n <name>`). Below uses `CAT=<catalog>`.
+on every call (`-p <path>` or `-n <name>`) — unless a user-set default already targets it
+(`xorq catalog default`), then drop the flags. Below uses `CAT=<catalog>`.
 
 ## A. Inline code — ad-hoc, most general
 

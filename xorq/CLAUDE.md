@@ -35,7 +35,10 @@ xorq catalog -n my-catalog  list --kind       # named, under ~/.local/share/xorq
 ```
 
 Threading `-p` / `-n` on every call is preferred over relying on the ambient default —
-it is explicit and survives subshells. Python equivalents: `Catalog.from_repo_path(path)`,
+it is explicit, stateless, and survives a fresh shell (each agent `Bash` call starts a new
+one — see the default note below). **Exception:** if `xorq catalog default` already reports
+a default the *user* set, honor it and drop the flags for that catalog; never *set* the
+default yourself. Python equivalents: `Catalog.from_repo_path(path)`,
 `Catalog.from_name(name)`, `Catalog.clone_from(url)`.
 
 If the target does not exist, commands fail with a clear message that names the exact fix —
@@ -54,13 +57,20 @@ with this precedence:
 The resolved name maps to `~/.local/share/xorq/catalogs/<name>`. Inspect or change it:
 
 ```bash
-xorq catalog default                    # e.g. "my-catalog  (source: env (XORQ_DEFAULT_CATALOG))"
-xorq catalog default --set my-catalog   # persist a sticky default
+xorq catalog default                    # read-only: the default's NAME + source -> "my-catalog (source: env (XORQ_DEFAULT_CATALOG))"
+xorq catalog default --set my-catalog   # writes ~/.config/xorq/catalog-default — machine-global, persists across sessions
 xorq catalog default --unset            # revert to built-in "default"
 ```
 
-**Clever env-var setup:** export `XORQ_DEFAULT_CATALOG=<name>` once (shell profile, `.envrc`,
-CI env) and every bare `xorq catalog` command in that session targets it — no `-p`/`-n` needed.
+**Honor a user-set default; don't establish one.** If `xorq catalog default` reports a name
+the user set, drop `-p`/`-n` for that catalog. Don't run `--set` yourself — it mutates
+**machine-global, persistent** state that leaks into every other shell / project / CI run
+until restored, the silent fall-through this section opens by warning against.
+
+**Why an agent can't just `export` it:** each `Bash` tool call starts a **fresh shell**, so an
+inline `export XORQ_DEFAULT_CATALOG=…` is gone by the next call. The env var goes flag-free
+across calls only when the **user** sets it where every shell re-sources it (profile / `.envrc`
+/ CI env). That's the clean opt-in — the user owns the config; the agent just respects it.
 
 ### Resolution procedure
 

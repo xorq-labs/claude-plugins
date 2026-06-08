@@ -35,7 +35,8 @@ templates below cover each backend.
 
 1. **Resolve the target catalog** — run the **Catalog Resolution** procedure in
    `xorq/CLAUDE.md` first. Pass it explicitly with `-p <path>` (or `-n <name>`) on every
-   command — the global flag comes **before** the subcommand. Below uses `CAT=<catalog>`.
+   command — the global flag comes **before** the subcommand — unless a user-set default
+   already targets it (`xorq catalog default`), then drop the flags. Below uses `CAT=<catalog>`.
 2. **Write the ingest expression** — a tiny script binding the source to a variable named
    `expr` (pick the template for your source below). `xorq build` captures `expr` by
    default; use `-e <name>` to override.

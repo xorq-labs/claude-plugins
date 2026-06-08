@@ -20,21 +20,28 @@ result with `list --kind`, `schema`, `show`, and a `run` row-preview from here.
 
 ## 1. Find a catalog
 
-Catalog *resolution* (the `-p`/`-n`/`-u`/`-r` flags, the default precedence) is ambient —
-the full rules are in **`xorq/CLAUDE.md` → Catalog Resolution**. To *discover* what exists:
+Catalog *resolution* (the `-p`/`-n`/`-u`/`-r` flags, the default precedence) is ambient — see
+**`xorq/CLAUDE.md` → Catalog Resolution**. To see what you're pointed at, ask xorq rather than
+hardcoding paths:
 
 ```bash
-ls ~/.local/share/xorq/catalogs/     # one directory per named catalog
-xorq catalog default                 # which catalog a bare command hits, and why
-                                     #   -> e.g. "default  (source: built-in)"
+xorq catalog default   # the default catalog's NAME and why -> "default  (source: built-in)"
+xorq catalog info      # resolves it and prints its PATH (+ commit, remotes, entry/alias counts)
 ```
 
-For a **repo-local** catalog, glob the repo for `catalog.yaml` (the exact glob + exclusions
-are in CLAUDE.md's resolution procedure); the parent dir of a hit is the catalog path.
+`info` is the clean way to get a catalog's path; target a specific one with a group flag
+(`xorq catalog -n <name> info`, `-p <path> info`). To find catalogs you haven't named yet:
+
+- **Repo-local:** glob the repo for `catalog.yaml` (exact glob + exclusions in CLAUDE.md's
+  resolution procedure); the parent dir of a hit is the catalog path.
+- **All named catalogs:** xorq has no command that enumerates them — they live under its store
+  root `~/.local/share/xorq/catalogs/` (HOME-relative), so `ls` that only when you need the list.
 
 Then thread the chosen target on **every** command — `-p <path>` or `-n <name>`, before the
-subcommand. Below uses `CAT=<catalog>`. Read commands never auto-create: a missing target
-fails with a message that names the fix.
+subcommand. Below uses `CAT=<catalog>`. **Exception:** if `xorq catalog default` already
+reports a default the user set, honor it and drop the flags (see CLAUDE.md → Catalog
+Resolution). Read commands never auto-create: a missing target fails with a message that
+names the fix.
 
 ## 2. List what's inside
 
