@@ -84,7 +84,9 @@ xorq catalog -p "$CAT" compose <source> totals_by_label --dry-run   # plan + res
 `compose` otherwise always catalogs. To execute for data **without** creating an entry, use
 `xorq catalog run <entries…>` instead.
 
-## Verify
+## Verify the entry landed
+
+Before reporting success, confirm the new `composed`/`expr` entry shows in `list --kind`.
 
 ```bash
 xorq catalog -p "$CAT" list --kind                 # expect: <hash>  composed

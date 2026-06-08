@@ -33,15 +33,15 @@ from prompts import IngestData
 pytestmark = pytest.mark.llm
 
 CSV_FILES = ["customers.csv", "products.csv", "transactions.csv"]
-PARQUET_FILES = ["events_dev.parquet", "events_prod.parquet", "metrics.parquet"]
+PARQUET_FILES = ["events_dev.parquet", "events_prod.parquet"]
 ALL_FILES = CSV_FILES + PARQUET_FILES
 
 
 def test_llm_ingest_raw(xorq_bin, claude_project, run_claude):
     """"load my raw data" -> EVERY file present is its own runnable source entry.
 
-    The project is seeded with exactly the 6 data files (3 CSV + 3 parquet, no
-    app.db/warehouse.duckdb), so "all my raw data" maps to precisely those 6 — one source
+    The project is seeded with exactly the 5 data files (3 CSV + 2 parquet, no
+    app.db/warehouse.duckdb), so "all my raw data" maps to precisely those 5 — one source
     entry each, matched by schema. This covers both the CSV and Parquet ingest paths (so
     there's no separate parquet test).
     """

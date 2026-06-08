@@ -81,8 +81,10 @@ across calls only when the **user** sets it where every shell re-sources it (pro
 2. **Decide:**
    - **One candidate** → use it (`-p <path>`).
    - **Several** → ask the user which one (`AskUserQuestion`).
-   - **None** → ask the user (`AskUserQuestion`): create a repo-local catalog, or use the
-     system default?
+   - **None** → **non-interactive** (no way to prompt — e.g. `claude -p`, no
+     `AskUserQuestion` tool): don't stall — create the repo-local catalog
+     (`xorq catalog -p ./<repo>-catalog init`) and proceed. **Interactive**: ask the user
+     (`AskUserQuestion`) — create a repo-local catalog, or use the system default?
      - **Create** (recommended): `xorq catalog -p ./<repo>-catalog init` — the path is
        created and initialized. The `<repo>-catalog` convention keeps repo and catalog names
        aligned so `xorq catalog info` is self-describing.

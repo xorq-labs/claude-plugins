@@ -286,7 +286,6 @@ SOURCES = {  # alias -> tests/data file
     "customers": "customers.csv",
     "products": "products.csv",
     "transactions": "transactions.csv",
-    "metrics": "metrics.parquet",
     "events_dev": "events_dev.parquet",
     "events_prod": "events_prod.parquet",
 }
@@ -574,6 +573,66 @@ def assert_derived(xorq_bin, run: ClaudeRun, check, *, limit=60):
         except AssertionError as e:
             last = e
     raise AssertionError(f"no derived entry matched expected\n  last: {last}\n  claude said: {run.said}")
+
+
+# --- builder outcome assertions: round-trip ExprBuilders (expr_builder entries) ---
+#
+# Mirrors derived_entries/assert_derived but for the builder skill. `entries_by_kind` generalizes
+# the finder to any kind set — the custom in-process builder's tag is decorative at `add` time
+# (no entry point), so its result can land as `expr` rather than `expr_builder`. `catalog_run_code_rows`
+# runs an entry through the skill's `-c 'source.ls.builder.<method>(...)'` round-trip path.
+
+
+def entries_by_kind(xorq_bin, run: ClaudeRun, kinds) -> list:
+    """(catalog, hash) for every entry whose ``list --kind`` kind is in ``kinds``."""
+    kinds = set(kinds)
+    out = []
+    cats = sorted({d for root in run.catalog_search_dirs if root.exists() for d in _catalog_dirs(root)})
+    for cat in cats:
+        for line in catalog_kinds(xorq_bin, cat).splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] in kinds:
+                out.append((cat, parts[0]))
+    return out
+
+
+def builder_entries(xorq_bin, run: ClaudeRun) -> list:
+    """(catalog, hash) for every ``expr_builder`` entry the model created."""
+    return entries_by_kind(xorq_bin, run, ("expr_builder",))
+
+
+def catalog_run_code_rows(xorq_bin, cat: Path, ident: str, code: str, limit=1000) -> list:
+    """Run an entry through the ``-c <code>`` round-trip path (current venv, offline) -> JSON rows.
+
+    ``code`` is evaluated in xorq's sandboxed namespace (``source`` / ``xo`` / ``ibis``) — e.g.
+    ``source.ls.builder.predict(xo.deferred_read_parquet("<path>"))`` to recover a builder and
+    re-run it on new data. Mirrors ``catalog_run_rows`` but adds ``-c``.
+    """
+    r = _xq(
+        xorq_bin, "catalog", "-p", str(cat), "run", ident, "-c", code,
+        "--use-this-venv", "-o", "-", "-f", "json", "--limit", str(limit),
+    )
+    return [json.loads(line) for line in r.stdout.splitlines() if line.strip().startswith("{")]
+
+
+def assert_entry_runs(xorq_bin, run: ClaudeRun, check, *, kinds, limit=200):
+    """Find an entry of one of ``kinds`` whose run satisfies ``check(rows)``; fail with claude's words."""
+    ents = entries_by_kind(xorq_bin, run, kinds)
+    assert ents, f"no entry of kinds {tuple(kinds)} created\nclaude said: {run.said}"
+    last = None
+    for cat, h in ents:
+        rows = catalog_run_rows(xorq_bin, cat, h, limit=limit)
+        if not rows:
+            last = "entry produced no rows"
+            continue
+        try:
+            check(rows)
+            return
+        except AssertionError as e:
+            last = e
+    raise AssertionError(
+        f"no entry of kinds {tuple(kinds)} matched\n  last: {last}\n  claude said: {run.said}"
+    )
 
 
 # --- catalog-explore outcome assertions: a read-only skill is judged on its ANSWER ---

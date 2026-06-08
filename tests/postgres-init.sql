@@ -26,6 +26,7 @@ COPY products FROM '/seed/products.csv' WITH (FORMAT csv, HEADER true);
 CREATE TABLE transactions (
     txn_id      text,
     customer_id integer,
+    product_id  text,
     amount      numeric,
     currency    text,
     category    text,

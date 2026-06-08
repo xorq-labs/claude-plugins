@@ -35,14 +35,6 @@ pytestmark = pytest.mark.llm
 # --- single-source shaping -> `catalog compose` -> composed ---
 
 
-def test_llm_compose_by_region(xorq_bin, claude_project, run_claude):
-    """metrics -> total revenue & order counts per region."""
-    seed_catalog_sources(xorq_bin, claude_project, ["metrics"])
-    run = run_claude(Compose.BY_REGION)
-    expected = pd.read_parquet(DATA / "metrics.parquet").groupby("region").revenue.sum().round(2).to_dict()
-    assert_derived(xorq_bin, run, lambda rows: assert_grouped(rows, expected))
-
-
 def test_llm_compose_per_tier(xorq_bin, claude_project, run_claude):
     """customers -> count per tier."""
     seed_catalog_sources(xorq_bin, claude_project, ["customers"])

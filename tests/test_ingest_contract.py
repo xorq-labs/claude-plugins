@@ -98,12 +98,12 @@ def test_ingest_csv_creates_source_and_runs(xorq_bin, tmp_path):
 
 
 def test_ingest_parquet_creates_source_and_runs(xorq_bin, tmp_path):
-    _need("metrics.parquet")
-    build = _build(xorq_bin, tmp_path, f'import xorq.api as xo\nexpr = xo.deferred_read_parquet({str(DATA / "metrics.parquet")!r})\n')
-    cat = _add(xorq_bin, tmp_path, build, "metrics_parquet")
+    _need("events_dev.parquet")
+    build = _build(xorq_bin, tmp_path, f'import xorq.api as xo\nexpr = xo.deferred_read_parquet({str(DATA / "events_dev.parquet")!r})\n')
+    cat = _add(xorq_bin, tmp_path, build, "events_parquet")
     assert "source" in _kinds(xorq_bin, cat)
     rows = _rows(xorq_bin, build)
-    assert rows and "revenue" in rows[0]
+    assert rows and "event_id" in rows[0]
 
 
 def test_ingest_sqlite_embeds_profile_and_runs(xorq_bin, tmp_path, sqlite_db):

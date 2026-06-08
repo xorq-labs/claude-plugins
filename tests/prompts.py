@@ -47,7 +47,6 @@ class Compose(StrEnum):
     """
 
     # single-source shaping -> `catalog compose` -> composed
-    BY_REGION = "From what's in my catalog, break down total revenue and order counts by region and save it as a new entry."
     PER_TIER = "How many customers are in each tier? Save the breakdown to the catalog."
     TOP_CATEGORY = "Which transaction category pulls in the most revenue? Add the answer to my catalog."
 
@@ -56,7 +55,34 @@ class Compose(StrEnum):
     FREE_FAVE = "What do my free-tier customers spend the most on? Add the answer to the catalog."
 
 
-class Build(StrEnum):
-    """xorq:builder — fit pipelines / semantic models (not yet wired)."""
+class Builder(StrEnum):
+    """xorq:builder — round-trip ExprBuilders: semantic models, fitted pipelines, custom builders.
 
-    FIT = "Fit a simple model on my data and save it to the catalog."
+    Plain-English, enough-info prompts (no aliases/commands). Each exercises the build → catalog →
+    recover (`.ls.builder`) → re-use loop on a different builder instance.
+    """
+
+    # semantic model: spend by category from transactions
+    CATEGORY_SPEND = (
+        "Build a semantic model from my transactions that gives me total spend per category, "
+        "and save it to the catalog."
+    )
+    # semantic model + join_one: tier lives on customers, relate each transaction to its one customer
+    SPEND_BY_TIER = (
+        "Now I want spend broken down by customer tier. The transactions don't carry the tier — "
+        "it's on the customers — so relate each transaction to its one customer and build that as "
+        "a semantic model saved to the catalog."
+    )
+    # fitted pipeline round-trip: train on dev events, catalog, recover, infer on prod events
+    ML_PURCHASE = (
+        "Train a model on my dev events to predict whether an event is a purchase, save the "
+        "fitted model to the catalog, then load it back from the catalog and use it to score my "
+        "prod events."
+    )
+    # custom builder round-trip: spec returns first-3 / last-3 chars; build first-3, recover, do last-3
+    TEXT_SLICE = (
+        "I want a small reusable builder whose spec can return either the first 3 or the last 3 "
+        "characters of a text column. Build one that takes the first 3 characters of the product "
+        "id and save it; then recover that builder from what you saved and use it to produce the "
+        "last-3-characters version, and save that result to the catalog."
+    )
