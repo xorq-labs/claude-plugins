@@ -154,7 +154,8 @@ xorq catalog -p "$CAT" run <alias> \
 
 - `source` is the entry's expression; `source.ls.builder` → the `FittedPipeline`; then
   `.predict(...)` / `.transform(...)` / `.predict_proba(...)` — the object's own API.
-- The `-c` namespace is **sandboxed** to `source` / `xo` / `ibis` — no imports or builtins.
+- The `-c` namespace is **sandboxed** to `source` / `xo` / `ibis` (xorq's vendored ibis,
+  `xorq.vendor.ibis`) — no imports or builtins.
 - This is the **`builder`** skill's §A round-trip applied to a fitted pipeline; see it for the
   general pattern and **`catalog-explore`** for inspecting an entry's type and metadata.
 

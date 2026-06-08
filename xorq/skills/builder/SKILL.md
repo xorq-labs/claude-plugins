@@ -59,8 +59,8 @@ xorq catalog -p "$CAT" run <builder-entry> \
   custom builder exposes.
 - `.to_tagged()` re-tags a semantic-model query result so the new expr is itself a builder; a
   fitted-pipeline / custom expr is already tagged, so it's often unnecessary.
-- The `-c` namespace is **sandboxed** to `source` / `xo` / `ibis` — no imports, no builtins, no
-  dunder access. Inspect a builder entry's type and metadata with `xorq catalog show <entry>`
+- The `-c` namespace is **sandboxed** to `source` / `xo` / `ibis` (xorq's vendored ibis,
+  `xorq.vendor.ibis`) — no imports, no builtins, no dunder access. Inspect a builder entry's type and metadata with `xorq catalog show <entry>`
   (the read-only inspection vocabulary is the **`catalog-explore`** skill).
 
 To **persist** a re-parameterized builder as its own `expr_builder` entry, use the build path

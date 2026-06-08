@@ -1,5 +1,5 @@
 ---
-description: Compose a new catalog entry from data already in the catalog — take a source entry, optionally apply reusable transform entries and/or an inline Ibis expression, then build and catalog the result in one step (ExprKind "composed"). Use when the inputs already live in a catalog; for raw files/tables use ingest, for fitting models use ml.
+description: Compose a new catalog entry from data already in the catalog — take a source entry, optionally apply reusable transform entries and/or an inline xorq expression, then build and catalog the result in one step (ExprKind "composed"). Use when the inputs already live in a catalog; for raw files/tables use ingest, for fitting models use ml.
 ---
 
 # Composer — Compose a New Entry from Catalogued Expressions
@@ -16,7 +16,7 @@ xorq catalog -p "$CAT" compose <source> [<transform> …] [-c "<inline expr>"] -
   `source`, `composed`, `expr`).
 - **Remaining entries = transforms**, applied in order. Each must be an **`unbound_expr`**
   entry (see below).
-- **`-c` / `--code`** = an inline Ibis expression over the variable `source`.
+- **`-c` / `--code`** = an inline xorq expression over the variable `source`.
 - Transforms and `--code` combine; **code runs last**. The result is always cataloged as a
   new `composed` entry; `-a` adds an alias.
 
@@ -35,8 +35,9 @@ xorq catalog -p "$CAT" compose <source> \
   -a <alias>
 ```
 
-- Reference columns as `source.<col>` or `source['<col>']`; chain Ibis ops freely.
-- The namespace is **sandboxed**: only `source`, `xo`, `ibis` — no imports, no builtins.
+- Reference columns as `source.<col>` or `source['<col>']`; chain xorq ops freely.
+- The namespace is **sandboxed**: only `source`, `xo`, and `ibis` (xorq's vendored ibis,
+  `xorq.vendor.ibis` — not the standalone package) — no imports, no builtins.
   For anything heavier than an expression chain, make a transform entry (below).
 
 ## B. Reusable transform entries — versioned, schema-checked

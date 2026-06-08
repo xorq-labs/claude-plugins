@@ -4,11 +4,25 @@ xorq is a multi-engine data processing framework built on [Ibis](https://ibis-pr
 and Apache DataFusion. It writes engine-agnostic, lazy expressions and versions them as
 content-addressed artifacts in a git-backed **catalog**.
 
+**Environment (check first):** if `xorq` isn't on PATH (`command -v xorq`), ask the user
+(`AskUserQuestion`) whether to make a local uv venv; if they decline, leave the environment
+as-is. Install **all three** packages every time — not just the one the current task seems to
+need — so the env is the full canonical set regardless of which skill runs next (Python
+`>=3.13,<3.14`):
+
+```
+uv venv --python 3.13 && \
+  uv pip install 'xorq>=0.3.28' 'boring-semantic-layer>=0.3.14' 'scikit-learn>=1.9.0'
+```
+
+then call `./.venv/bin/xorq`. Add backend extras (`xorq[duckdb]` etc.) on top as needed.
+
 ## Catalog Resolution (do this FIRST, before any catalog operation)
 
 Before any `xorq catalog …` command or `Catalog.from_*` call, resolve **which catalog**
-you are operating on. Never silently fall through to the built-in `default` — be explicit,
-and prefer a repo-scoped catalog.
+you are operating on. xorq ships with a built-in `default` catalog, so commands work the
+moment a user points them at data — but **recommend the user create their own catalog for
+their data**. Be explicit about which catalog is in use; don't silently switch between them.
 
 xorq resolves a catalog through **two independent mechanisms**.
 
@@ -19,8 +33,8 @@ xorq resolves a catalog through **two independent mechanisms**.
 
 | Flag | Meaning | Resolves to |
 |------|---------|-------------|
-| `-p, --path <dir>` | Catalog at any local path | the repo at `<dir>` (run `init` first if it does not exist) |
 | `-n, --name <name>` | Named catalog | `~/.local/share/xorq/catalogs/<name>` |
+| `-p, --path <dir>` | Catalog at any local path | the repo at `<dir>` (run `init` first if it does not exist) |
 | `-u, --url <url>` | Remote catalog (optionally `+ -p <dest>`) | **cloned** from `<url>` (to `<dest>` if given) |
 | `-r, --root-repo <dir>` | Submodule install (pair with `-n` or `-u`) | `<dir>/.xorq/catalogs/<name>` |
 
@@ -30,15 +44,15 @@ xorq resolves a catalog through **two independent mechanisms**.
 clone-as-submodule, `-r -n <name>` → add the named catalog as a submodule).
 
 ```bash
-xorq catalog -p ./my-catalog list --kind     # local path
 xorq catalog -n my-catalog  list --kind       # named, under ~/.local/share/xorq/catalogs/
+xorq catalog -p ./my-catalog list --kind      # local path
 ```
 
 Threading `-p` / `-n` on every call is preferred over relying on the ambient default —
 it is explicit, stateless, and survives a fresh shell (each agent `Bash` call starts a new
 one — see the default note below). **Exception:** if `xorq catalog default` already reports
-a default the *user* set, honor it and drop the flags for that catalog; never *set* the
-default yourself. Python equivalents: `Catalog.from_repo_path(path)`,
+a default the *user* set, honor it and drop the flags for that catalog. Only *set* the
+default yourself with the user's explicit yes (the onboarding flow below). Python equivalents: `Catalog.from_repo_path(path)`,
 `Catalog.from_name(name)`, `Catalog.clone_from(url)`.
 
 If the target does not exist, commands fail with a clear message that names the exact fix —
@@ -62,10 +76,11 @@ xorq catalog default --set my-catalog   # writes ~/.config/xorq/catalog-default 
 xorq catalog default --unset            # revert to built-in "default"
 ```
 
-**Honor a user-set default; don't establish one.** If `xorq catalog default` reports a name
-the user set, drop `-p`/`-n` for that catalog. Don't run `--set` yourself — it mutates
-**machine-global, persistent** state that leaks into every other shell / project / CI run
-until restored, the silent fall-through this section opens by warning against.
+**Honor a user-set default; set one only when the user says so.** If `xorq catalog default`
+reports a name the user set, drop `-p`/`-n` for that catalog. Run `--set` **only** when the
+user answers yes to the onboarding question below — it mutates **machine-global, persistent**
+state that leaks into every other shell / project / CI run until restored, so never set it
+silently or without that explicit yes.
 
 **Why an agent can't just `export` it:** each `Bash` tool call starts a **fresh shell**, so an
 inline `export XORQ_DEFAULT_CATALOG=…` is gone by the next call. The env var goes flag-free
@@ -74,23 +89,27 @@ across calls only when the **user** sets it where every shell re-sources it (pro
 
 ### Resolution procedure
 
-1. **Look for an existing repo-local catalog.** Glob the repo for `catalog.yaml`, excluding
+1. **Honor an existing choice first.** If `xorq catalog default` reports a name the *user*
+   set, use it flag-free — done. Otherwise glob the repo for `catalog.yaml`, excluding
    `venv/`, `.venv/`, `node_modules/`, `.git/`, `__pycache__/`, `builds*/`, and any catalog's
    own `entries/`/`aliases/`. The parent directory of a surviving hit is a candidate
    (e.g. a hit at `./local_test-catalog/catalog.yaml` → catalog path `./local_test-catalog`).
-2. **Decide:**
-   - **One candidate** → use it (`-p <path>`).
+   - **One candidate** → use it (`-p <path>`), state it, done.
    - **Several** → ask the user which one (`AskUserQuestion`).
-   - **None** → **non-interactive** (no way to prompt — e.g. `claude -p`, no
-     `AskUserQuestion` tool): don't stall — create the repo-local catalog
-     (`xorq catalog -p ./<repo>-catalog init`) and proceed. **Interactive**: ask the user
-     (`AskUserQuestion`) — create a repo-local catalog, or use the system default?
-     - **Create** (recommended): `xorq catalog -p ./<repo>-catalog init` — the path is
-       created and initialized. The `<repo>-catalog` convention keeps repo and catalog names
-       aligned so `xorq catalog info` is self-describing.
-     - **Use default**: bare commands resolve via the precedence chain above. Tell the user
-       which catalog that is (and whether `XORQ_DEFAULT_CATALOG` is set).
-3. **Surface the decision.** State plainly `Using catalog: <name | path>`, and don't re-ask
+2. **No catalog yet — onboard the user (interactive).** Tell them: *xorq ships with a
+   built-in `default` catalog, so everything works right now — but we recommend creating your
+   own catalog for your data.* Then walk two short questions (`AskUserQuestion`):
+   - **"Create a named catalog for your data?"** (recommended) — if yes, pick a name
+     (suggest the repo name) and run `xorq catalog -n <name> init`. If no, use the built-in
+     `default` (bare commands) and skip the next question.
+   - **"Set it as your default?"** — so later commands need no flags. If yes,
+     `xorq catalog default --set <name>` (writes `~/.config/xorq/catalog-default`; this is
+     machine-global, so only run it on this explicit yes). If no, thread `-n <name>` on each
+     command for the rest of the session.
+3. **No catalog yet — non-interactive** (`claude -p`, no `AskUserQuestion` tool): you can't
+   ask, and `--set`/`init` shouldn't be guessed on the user's behalf — use the built-in
+   `default`, state it, and proceed.
+4. **Surface the decision.** State plainly `Using catalog: <name | path>`, and don't re-ask
    for the rest of the session.
 
 ### Catalog locations
