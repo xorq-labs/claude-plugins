@@ -2,9 +2,12 @@ name: tests
 
 on:
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deterministic:
@@ -25,7 +28,7 @@ jobs:
   llm-e2e:
     name: LLM e2e (manual)
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: bigger-runner
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
