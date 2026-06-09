@@ -34,12 +34,14 @@ Resolve **which catalog** you operate on, then use the least-verbose correct for
    for a path-only catalog) — session-only, never `xorq catalog default --set` (machine-global) and you
    can't `export` across Bash calls. Non-interactively, adopt the discovered catalog without asking.
    State `Using catalog: <name | path>` once; don't re-ask.
-3. **No default and no catalog exists → create one; prefer a named global catalog.** Ask for a name
-   (suggest the repo name); `xorq catalog -n <name> init` it once, then prefix every command
-   `XORQ_DEFAULT_CATALOG=<name>` (or `-n <name>`). If the user declines a named catalog, fall back to
-   a **repo-local** one — `xorq catalog -p ./<name> init`, then `-p ./<name>` on each command — which
-   keeps the data with the project, out of global `~/.local/share`. Non-interactively, create the
-   named catalog (repo name) without asking.
+3. **No default and no catalog exists → create one; prefer a named global catalog — but never mint
+   one unilaterally.** Interactively, **ask BEFORE creating** (`AskUserQuestion`): *"Create a named
+   catalog `<repo-name>` for your data?"* (recommended; name editable). On yes,
+   `xorq catalog -n <name> init` it once, then prefix every command `XORQ_DEFAULT_CATALOG=<name>`
+   (or `-n <name>`). If the user declines a named catalog, fall back to a **repo-local** one —
+   `xorq catalog -p ./<name> init`, then `-p ./<name>` on each command — which keeps the data with
+   the project, out of global `~/.local/share`. Only non-interactively do you create the named
+   catalog (repo name) without asking.
 4. **A second / non-default catalog in the same shell → target it explicitly**, before the subcommand:
    `-n <name>` (named) or `-p <path>` (path) — e.g. `xorq catalog -p ./other list`.
 
