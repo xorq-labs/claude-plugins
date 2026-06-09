@@ -4,145 +4,89 @@ description: Find and inspect xorq catalogs read-only — discover which catalog
 
 # Catalog-Explore — Read-Only Catalog Inspection
 
-Discover which catalogs exist, then look inside one: list entries and aliases, show an
-entry's metadata and schema, preview a few rows, read the history. Everything here is
-**read-only** — it never changes the catalog. This is also the **verification vocabulary**
-the other skills lean on: after an `ingest` / `composer` / `ml` build, you confirm the
-result with `list --kind`, `schema`, `show`, and a `run` row-preview from here.
+Discover which catalogs exist, then look inside one: list entries and aliases, show an entry's metadata
+and schema, preview rows, read history. Everything here is **read-only** — it never changes the catalog.
+This is also the **verification vocabulary** the other skills lean on (the kernel's VERIFY points here):
+after an `ingest` / `composer` / `ml` build, confirm the result with `list --kind`, `schema`, `show`,
+and a `run` preview.
 
-> **Read-only only.** This skill runs only commands that cannot mutate a catalog:
-> `info` · `list` · `list-aliases` · `show` · `schema` · `log` · `check` · `default` (no
-> flags) · `run` (executes, adds nothing). It does **not** `add` / `remove` /
-> `add-alias` / `remove-alias` / `compose` / `init` / `clone` / `pull` / `push` / `sync` /
-> `set-remote` — those mutate. To create entries use `ingest` / `composer` / `ml`; to
-> acquire a catalog (clone/pull/replay) or **set** the default (`default --set`) see
-> `xorq/CLAUDE.md` — that's xorq's own machinery, not this skill.
+**Read-only commands only:** `info` · `list` · `list-aliases` · `show` · `schema` · `log` · `check` ·
+`default` (no flags) · `run` (executes, adds nothing). **Never** `add` / `remove` / `add-alias` /
+`remove-alias` / `compose` / `init` / `clone` / `pull` / `push` / `sync` / `set-remote` — those mutate
+(to create entries use `ingest` / `composer` / `ml`). The kernel's BUILD-ADD / RECOVER are for those
+skills; here, only read.
+
 
 ## 1. Find a catalog
 
-Catalog *resolution* (the `-p`/`-n`/`-u`/`-r` flags, the default precedence) is ambient — see
-**`xorq/CLAUDE.md` → Catalog Resolution**. To see what you're pointed at, ask xorq rather than
-hardcoding paths:
+Resolution (which catalog; the flags / env var) is in the kernel. To see what you're pointed at:
 
 ```bash
-xorq catalog default   # the default catalog's NAME and why -> "default  (source: built-in)"
-xorq catalog info      # resolves it and prints its PATH (+ commit, remotes, entry/alias counts)
+xorq catalog default   # the default's NAME and source -> "default  (source: built-in)"
+xorq catalog info      # resolves it, prints the PATH (+ commit, remotes, entry/alias counts)
 ```
 
-`info` is the clean way to get a catalog's path; target a specific one with a group flag
-(`xorq catalog -n <name> info`, `-p <path> info`). To find catalogs you haven't named yet:
+Target a specific one with a group flag (`-p <path> info`, `-n <name> info`) or `XORQ_DEFAULT_CATALOG=<name> … info`.
 
-- **Repo-local:** glob the repo for `catalog.yaml` (exact glob + exclusions in CLAUDE.md's
-  resolution procedure); the parent dir of a hit is the catalog path.
-- **All named catalogs:** xorq has no command that enumerates them — they live under its store
-  root `~/.local/share/xorq/catalogs/` (HOME-relative), so `ls` that only when you need the list.
-
-Then thread the chosen target on **every** command — `-p <path>` or `-n <name>`, before the
-subcommand. Below uses `CAT=<catalog>`. **Exception:** if `xorq catalog default` already
-reports a default the user set, honor it and drop the flags (see CLAUDE.md → Catalog
-Resolution). Read commands never auto-create: a missing target fails with a message that
-names the fix.
-
-## 2. List what's inside
+## 2. List entries and aliases
 
 ```bash
-CAT=<catalog>                                  # e.g. ./my-catalog   (or: -n my-catalog)
-xorq catalog -p "$CAT" info                    # path, commit, remotes, entry/alias counts
-xorq catalog -p "$CAT" list --kind             # entries (content hashes) + kind
-xorq catalog -p "$CAT" list-aliases            # the human-readable handles
-```
-```
-# list --kind                 # list-aliases
-a1b2c3d4e5f6	source          <your-alias>
+xorq catalog list --kind             # entries (content hashes) + kind
+xorq catalog list-aliases            # the human-readable handles
 ```
 
-**Entries are content hashes; aliases are the human names that point at them.** `list`
-shows hashes, `list-aliases` shows handles — and `show` / `schema` / `run` accept **either**.
+**Entries are content hashes; aliases are the names that point at them.** `list` shows hashes,
+`list-aliases` shows handles — `show` / `schema` / `run` accept **either**.
 
 ## 3. Inspect one entry
 
 ```bash
-xorq catalog -p "$CAT" show <alias>            # full metadata (by alias or hash)
-xorq catalog -p "$CAT" schema <alias>          # just the schema
-xorq catalog -p "$CAT" schema <alias> --json   # ExprMetadata as JSON (schema_in/out, params…)
-xorq catalog -p "$CAT" show <alias> --raw      # the metadata sidecar verbatim (YAML)
-```
-
-`show` reports the kind, aliases, backends, content-local flag, composed-from / params /
-builders when present, and the in/out schema:
-
-```
-Name:           a1b2c3d4e5f6
-Aliases:        <alias>
-Type:           Source (bound)
-Backends:       <backend>
-Content local:  yes
-Schema Out:
-  <col>                    <dtype>
-  …
+xorq catalog show <alias>            # full metadata: kind, aliases, backends, content-local, composed-from / params / builders, in/out schema
+xorq catalog schema <alias> --json   # ExprMetadata as JSON (schema_in/out, params…)
+xorq catalog show <alias> --raw      # the metadata sidecar verbatim (YAML)
 ```
 
 ## 4. Preview rows (read-only execution)
 
-`run` composes-and-executes an entry without persisting anything. **`-o -` is required** —
-output defaults to `/dev/null`:
+`run` composes-and-executes an entry without persisting. **`-o -` required**:
 
 ```bash
-xorq catalog -p "$CAT" run <alias> -o - -f json --limit 5
-# one JSON object per row: {"<col>": <value>, ...}
+xorq catalog run <alias> -o - -f json --limit 5   # one JSON object per row
 ```
 
-- `--use-this-venv` runs in the current environment (faster, no `uv tool run` subprocess) —
-  correct only when this env already has every dependency the entry needs.
-- **DuckDB caveat (0.3.28):** `catalog run` can't locate a materialized DuckDB entry's
-  parquet — preview those with `xorq run <build-path>` instead (see `ingest`).
-
-## 5. Read history & check integrity
+## 5. History & integrity
 
 ```bash
-xorq catalog -p "$CAT" log          # replay plan: [init]/[add]/[remove] ops + summary
-xorq catalog -p "$CAT" log --json   # same, structured
-xorq catalog -p "$CAT" check        # validate catalog consistency -> "OK"
+xorq catalog log [--json]   # replay plan: [init]/[add]/[remove] ops + summary
+xorq catalog check          # validate consistency -> "OK"
 ```
 
-Interactive browsing (humans, not headless agents): `xorq catalog -p "$CAT" tui`.
+(Interactive browsing for humans, not headless agents: `xorq catalog tui`.)
 
-## Verifying a build produced the right entry
+## Verifying a build (the VERIFY vocabulary)
 
 The canonical post-build checks the other skills point back to:
 
 ```bash
-xorq catalog -p "$CAT" list --kind                       # expect the new <hash>  <kind>
-xorq catalog -p "$CAT" list-aliases                      # expect your alias present
-xorq catalog -p "$CAT" schema <alias> --json             # expect the right schema_out
-xorq catalog -p "$CAT" run <alias> -o - -f json --limit 5  # expect rows
+xorq catalog list --kind                          # expect the new <hash>  <kind>
+xorq catalog list-aliases                         # expect your alias present
+xorq catalog schema <alias> --json                # expect the right schema_out
+xorq catalog run <alias> -o - -f json --limit 5   # expect rows
 ```
 
-## Inline Python
+The Python mirror (`cat.get_catalog_entry(...)` + sidecar `.kind` / `.columns` / `.schema_out`) is in
+[reference.md](../_shared/reference.md).
 
-Prefer the CLI above. The Python equivalent — `cat.get_catalog_entry(name, maybe_alias=True)`
-and an entry's sidecar-backed `.kind` / `.columns` / `.schema_out` / … properties — is
-ambient: see **Building expressions** in `xorq/CLAUDE.md`.
+## Pitfalls (explore-specific; shared ones are in the kernel)
 
-## Pitfalls
-
-- **No auto-create.** Read commands never initialize a catalog; a missing target fails with
-  a clear "Catalog not found … run `init`" message. Resolve the catalog first (CLAUDE.md).
-- **Hash vs alias.** `list` prints content hashes, `list-aliases` prints handles; pass
-  either to `show` / `schema` / `run`. "Entry not found" → check both lists.
-- **Content may not be local.** A cloned catalog can show `Content local: no` — sidecar
-  metadata (kind/schema/backends/aliases) still reads, but previewing rows or loading
-  `.expr` triggers an annex fetch from the remote.
-- **`-o -` for previews** — without it `run` writes to `/dev/null` and you see nothing.
-- **`VIRTUAL_ENV` mismatch** (`VIRTUAL_ENV=… does not match …`) → prefix with
-  `uv run --active`.
-
-## Docs
-
-The full, machine-readable index of every CLI command and Python API is at
-<https://docs.xorq.dev/llms.txt>.
+- **No auto-create.** Read commands never initialize a catalog; a missing target fails with a clear
+  "Catalog not found … run `init`" message.
+- **Hash vs alias.** Pass either to `show` / `schema` / `run`; "Entry not found" → check both lists.
+- **Content may not be local.** A cloned catalog can show `Content local: no` — sidecar metadata
+  (kind / schema / backends / aliases) still reads, but previewing rows or loading `.expr` triggers an
+  annex fetch from the remote.
 
 ## Arguments
 
-If the user provides arguments: $ARGUMENTS — treat them as the catalog to explore
-(`-p` / `-n`) and/or the entry or alias to inspect.
+If the user provides arguments: $ARGUMENTS — treat them as the catalog to explore (`-p` / `-n`) and/or
+the entry or alias to inspect.

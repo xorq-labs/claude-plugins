@@ -4,15 +4,14 @@ description: Round-trip xorq ExprBuilders through the catalog — an expr whose 
 
 # Builder — Round-Trip ExprBuilders Through the Catalog
 
-An **ExprBuilder** is "an expr that builds exprs": an expression whose **outermost recognized
-tag** carries domain metadata. Catalogue one and its kind is **`expr_builder`**; recover the live
-domain object from the entry with **`expr.ls.builder`** and call its methods to build new exprs.
-This skill is the **round-tripping and extension layer** — to/from builder entries, and how to
-make your own objects round-trip. It is **not** an ML tutorial: fitting models lives in **`ml`**;
-a fitted pipeline shows up here only as one instance of the machinery.
+An **ExprBuilder** is "an expr that builds exprs": an expression whose **outermost recognized tag**
+carries domain metadata. Catalogue one and its kind is **`expr_builder`**; recover the live domain
+object from the entry with **`expr.ls.builder`** and call its methods to build new exprs. This skill is
+the **round-tripping and extension layer** — to/from builder entries, and how to make your own objects
+round-trip. Fitting models lives in **`ml`**; a fitted pipeline shows up here only as one instance.
 
-**One shape, three instances.** Each produces an expr carrying a builder tag; cataloguing it
-gives an `expr_builder` entry that round-trips the same way:
+**One shape, three instances.** Each produces an expr carrying a builder tag; cataloguing it gives an
+`expr_builder` entry that round-trips the same way:
 
 | Builder | Produce the tagged expr | `expr.ls.builder` returns | Re-build by calling |
 |---|---|---|---|
@@ -20,60 +19,42 @@ gives an `expr_builder` entry that round-trips the same way:
 | Fitted pipeline (**`ml`**) | `fitted.predict(<data>)` / `.transform(<data>)` — already tagged | the `FittedPipeline` | `.predict(…)` / `.transform(…)` |
 | Custom | `base.tag("<tag>", **metadata)` | your domain object | whatever it exposes |
 
-**Semantic models can span joins.** A model may declare relationships — `join_one` (1:1 /
-reference lookup), `join_many` (1:many; pre-aggregates to avoid fan-out), or `join_cross` — with
-`on=` (a column name, a `_.col` deferred, a `(l, r) -> bool` lambda, or a list for compound keys)
-and `how=`. Joined dimensions and measures are **table-prefixed** — `<table>.<field>` — in both
-`.query(...)` and the captured tag metadata, and the cardinality is part of the spec, so a
-catalogued joined model runs its stored query across the join and `show` reports the prefixed
-fields. Authoring the relationships is boring-semantic-layer's domain (see its docs); for
-round-tripping, note one limit: a recovered **`join_one`** model re-queries cleanly via
-`.ls.builder`, but re-querying a recovered **`join_many`** model raises a dimension-resolution
-error (bsl 0.3.14) — for a different selection over a one-to-many model, re-run the stored query
-or rebuild from source (**B**) instead of re-querying the recovered object.
+**Joins (semantic models).** A model may declare `join_one` / `join_many` / `join_cross` relationships
+(authoring is boring-semantic-layer's domain); joined dimensions and measures are **table-prefixed**
+(`<table>.<field>`) in both `.query(...)` and the captured metadata. Round-tripping caveat: a recovered
+**`join_one`** model re-queries cleanly, but re-querying a recovered **`join_many`** model raises a
+dimension-resolution error (bsl 0.3.14) — for a new selection over a one-to-many model, re-run the
+stored query or rebuild from source (**B**) instead of re-querying the recovered object.
 
-## Resolve the catalog
 
-Run the **Catalog Resolution** procedure in `xorq/CLAUDE.md` first, then thread the target on
-every call (`-p <path>` or `-n <name>`) — unless a user-set default already targets it
-(`xorq catalog default`), then drop the flags. Below uses `CAT=<catalog>`.
+## A. Recover and re-query (the RECOVER primitive)
 
-## A. CLI-first — recover a builder entry and re-query it
-
-A bare `run` executes the entry's stored query; with `-c` you **recover the builder and
-re-parameterize it** — "use an expr builder to make a new expr" — and execute, without writing a
-new entry. **`-o -` is required** (output defaults to `/dev/null`):
+A bare `run` executes the entry's stored query; **RECOVER** recovers the builder and re-parameterizes
+it — "use an expr builder to make a new expr" — then executes, writing no new entry:
 
 ```bash
-CAT=<catalog>
-xorq catalog -p "$CAT" run <builder-entry> -o - -f json --limit 5          # the stored query
-
-xorq catalog -p "$CAT" run <builder-entry> \
-  -c 'source.ls.builder.<method>(<params>).to_tagged()' \
-  -o - -f json --limit 5                                                     # recover + re-query
+xorq catalog run <builder-entry> \
+  -c 'source.ls.builder.<method>(<params>).to_tagged()' -o - -f json --limit 5
 ```
 
-- `source` is the entry's expression; `source.ls.builder` recovers the live domain object.
-- `<method>(<params>)` is **that object's own API** — `.query(dimensions=[…], measures=[…])` for a
-  semantic model, `.predict(<data>)` / `.transform(<data>)` for a fitted pipeline, or whatever a
+- `<method>(<params>)` is the recovered object's **own API** — `.query(dimensions=[…], measures=[…])`
+  for a semantic model, `.predict(<data>)` / `.transform(<data>)` for a fitted pipeline, or whatever a
   custom builder exposes.
 - `.to_tagged()` re-tags a semantic-model query result so the new expr is itself a builder; a
   fitted-pipeline / custom expr is already tagged, so it's often unnecessary.
-- The `-c` namespace is **sandboxed** to `source` / `xo` / `ibis` (xorq's vendored ibis,
-  `xorq.vendor.ibis`) — no imports, no builtins, no dunder access. Inspect a builder entry's type and metadata with `xorq catalog show <entry>`
-  (the read-only inspection vocabulary is the **`catalog-explore`** skill).
+- Inspect a builder entry's type and metadata with `xorq catalog show <entry>` (the read-only
+  inspection vocabulary is the **`catalog-explore`** skill).
 
-To **persist** a re-parameterized builder as its own `expr_builder` entry, use the build path
-(**B**) — `catalog compose` always records a `composed` entry (see **`composer`**), even when its
-`-c` ends in `.to_tagged()` (the compose wrapper is outermost). The builder stays recoverable
-under that wrapper via `.ls.builder`, but the entry kind is `composed`, not `expr_builder`.
+To **persist** a re-parameterized builder as its own `expr_builder` entry, use **B** — `catalog compose`
+always records a `composed` entry (see **`composer`**) even when its `-c` ends in `.to_tagged()` (the
+compose wrapper is outermost). The builder stays recoverable under that wrapper via `.ls.builder`, but
+the entry kind is `composed`, not `expr_builder`.
 
-## B. Build / originate a builder entry from a script
+## B. Build / originate a builder entry (the BUILD-ADD primitive)
 
-When the builder isn't catalogued yet, mint it with the same **build → add** primitive every
-entry uses (the lightest-tool ladder and `expr.ls.*` introspection are ambient — see **Building
-expressions** in `xorq/CLAUDE.md`; the add step mirrors **`composer`** / **`ingest`**). The only
-new thing is producing a **tagged** expression:
+When the builder isn't catalogued yet, mint it with **BUILD-ADD**. The only new thing is producing a
+**tagged** expression bound to `expr` (the lightest-tool ladder and `expr.ls.*` introspection are in
+[reference.md](../_shared/reference.md)):
 
 ```python
 # build_builder.py — bind the result expression to `expr`
@@ -85,15 +66,13 @@ expr = <builder-result>
 #   custom         : base.tag("<tag>", **metadata)     # needs a registered handler (C)
 ```
 
-```bash
-xorq build build_builder.py --builds-dir builds_builder --emit-build-path-to bp.txt
-xorq catalog -p "$CAT" add "$(cat bp.txt)" -a <alias>      # kind: expr_builder
-```
+`xorq build build_builder.py --builds-dir builds_builder …` then `catalog add … -a <alias>` →
+**kind: `expr_builder`**.
 
 ## C. Author a custom TagHandler (the extension layer)
 
-Make any domain object round-trip: declare a **`TagHandler`** that maps your tag to (1) sidecar
-metadata and (2) a recovered object, then **`tag`** your expressions with it.
+Make any domain object round-trip: declare a **`TagHandler`** mapping your tag to (1) sidecar metadata
+and (2) a recovered object, then **`tag`** your expressions with it.
 
 ```python
 # my_handlers.py
@@ -105,8 +84,7 @@ def _extract_metadata(tag_node):              # -> sidecar dict; always readable
 
 def _from_tag_node(tag_node):                 # -> the live object; used by expr.ls.builder
     base = tag_node.parent.to_expr()          # the expression directly below the tag
-    m = tag_node.metadata
-    return MyBuilder.from_parts(base, m)       # reconstruct from what the tag captured
+    return MyBuilder.from_parts(base, tag_node.metadata)
 
 handler = TagHandler(
     tag_names=("<tag>",),
@@ -114,14 +92,13 @@ handler = TagHandler(
     from_tag_node=_from_tag_node,
     # reemit=...,                              # opt-in: rebuild hook for `catalog replay --rebuild`
 )
-register_tag_handler(handler)                  # in-process registration — see Pitfalls
+register_tag_handler(handler)                  # in-process only — see Pitfalls
 ```
 
 Tag an expression to make it a builder: `base.tag("<tag>", key=value, …)`.
 
-For the handler to be found across **separate processes** (`build` / `catalog add` / `catalog
-run` each run in their own, often isolated, env), **register it as an entry point** in the
-package that ships it — not just in-process:
+For the handler to be found across **separate processes** (`build` / `catalog add` / `catalog run` each
+run in their own, often isolated, env), **register it as an entry point** in the package that ships it:
 
 ```toml
 # pyproject.toml of the package that defines the handler
@@ -129,50 +106,39 @@ package that ships it — not just in-process:
 my_plugin = "my_package.my_handlers:handler"
 ```
 
-Built-in handlers (the ML `FittedPipeline`) and entry-point handlers (e.g. boring-semantic-layer
-ships one) are discovered automatically in every process.
+Built-in handlers (the ML `FittedPipeline`) and entry-point handlers (e.g. boring-semantic-layer's) are
+discovered automatically in every process.
 
 ## Verify
 
+Run **VERIFY**. For a builder entry, expect:
+
 ```bash
-xorq catalog -p "$CAT" list --kind        # expect: <hash>  expr_builder
-xorq catalog -p "$CAT" show <alias>       # "Type: Expression Builder", "Root tag:", a "Builders:" block
-xorq catalog -p "$CAT" run <alias> -c 'source.ls.builder.<method>(<params>).to_tagged()' \
+xorq catalog list --kind        # expect: <hash>  expr_builder
+xorq catalog show <alias>       # "Type: Expression Builder", "Root tag:", a "Builders:" block
+xorq catalog run <alias> -c 'source.ls.builder.<method>(<params>).to_tagged()' \
   -o - -f json --limit 5                  # round-trips: recovers the builder and re-queries
 ```
 
-`expr.ls.expr_traits.has_builders` is a cheap in-process predicate. Full inspection vocabulary
-(`show` / `schema` / `list`) is the **`catalog-explore`** skill.
+`expr.ls.expr_traits.has_builders` is a cheap in-process predicate.
 
-## Pitfalls
+## Pitfalls (builder-specific; shared ones are in the kernel)
 
-- **Outermost-tag-only detection.** The kind is decided by the **outermost recognized** builder
-  tag. An **unrecognized** tag is decorative — the entry classifies as its underlying kind
-  (`source` / `expr`). Wrapping a builder (e.g. via `catalog compose`) yields a `composed` entry,
-  not `expr_builder`; the builder is still recoverable underneath via `.ls.builder`. To mint an
-  `expr_builder` entry, use the build path (**B**).
+- **Outermost-tag-only detection.** The kind is the **outermost recognized** builder tag. An
+  unrecognized tag is decorative — the entry classifies as its underlying kind (`source` / `expr`).
+  Wrapping a builder (e.g. via `catalog compose`) yields a `composed` entry; the builder is still
+  recoverable underneath via `.ls.builder`. To mint an `expr_builder`, use **B**.
 - **Registration scope is process-local.** `register_tag_handler(...)` lasts only for the current
-  Python process. `build` / `catalog add` / `catalog run` are **separate** processes, so a custom
-  handler must be installed as a **`xorq.from_tag_node` entry point** in the build's environment —
-  otherwise `.ls.builder` raises `No builder tags found in expression`. The **sidecar**
-  (`extract_metadata`) is captured at add time and always reads back; only **live recovery**
-  (`from_tag_node`) needs the handler present.
-- **`from_tag_node` reconstructs only what the tag captured.** Store everything the rebuild needs
-  in the `.tag(...)` metadata — the recovered object can't see fields that weren't tagged.
-- **Tag-key collisions.** A duplicate `tag_names` registration raises (pass `override=True` to
-  replace); built-in tag keys are protected and can't be overridden.
-- **`-c` is sandboxed** to `source` / `xo` / `ibis` — no imports, no builtins, no dunders.
-- **Identical `requirements.txt`** across entries built together (isolated builds merge bundles);
-  **one catalog op at a time** (git/annex isn't concurrency-safe); **`VIRTUAL_ENV` mismatch** →
-  prefix with `uv run --active`.
-
-## Docs
-
-The full, machine-readable index of every CLI command and Python API is at
-<https://docs.xorq.dev/llms.txt>.
+  process. `build` / `catalog add` / `catalog run` are **separate** processes, so a custom handler must
+  be installed as a **`xorq.from_tag_node` entry point** in the build's environment — otherwise
+  `.ls.builder` raises `No builder tags found in expression`. The **sidecar** (`extract_metadata`) is
+  captured at add time and always reads back; only **live recovery** (`from_tag_node`) needs the handler.
+- **`from_tag_node` reconstructs only what the tag captured** — store everything the rebuild needs in
+  `.tag(...)` metadata.
+- **Tag-key collisions** — a duplicate `tag_names` registration raises (`override=True` to replace);
+  built-in tag keys are protected.
 
 ## Arguments
 
-If the user provides arguments: $ARGUMENTS — treat them as the builder entry to round-trip
-(recover + re-query, or persist a re-parameterized variant), and/or the target catalog
-(`-p` / `-n`).
+If the user provides arguments: $ARGUMENTS — treat them as the builder entry to round-trip (recover +
+re-query, or persist a re-parameterized variant), and/or the target catalog (`-p` / `-n`).

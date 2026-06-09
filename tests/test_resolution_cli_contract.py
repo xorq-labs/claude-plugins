@@ -1,12 +1,12 @@
-"""Contract tests for the xorq CLI behaviors documented in ``xorq/CLAUDE.md``.
+"""Contract tests for the xorq CLI behaviors the shared kernel/reference rely on.
 
-Scope: ONLY the behaviors that CLAUDE.md's "Catalog Resolution" section
-explicitly relies on. This is intentionally *not* an exhaustive test of xorq —
-it is a **drift alarm**. If one of these fails, xorq's CLI changed and
-``xorq/CLAUDE.md`` must be updated so the ambient context Claude reads stays
-accurate.
+Scope: ONLY the behaviors that ``skills/_shared/kernel.md`` (catalog resolution) and
+``skills/_shared/reference.md`` (the flag / precedence / locations detail) explicitly rely
+on. This is intentionally *not* an exhaustive test of xorq — it is a **drift alarm**. If one
+of these fails, xorq's CLI changed and the kernel/reference must be updated so the vocabulary
+the skills inject stays accurate.
 
-Each test names the exact CLAUDE.md claim it pins. Verified against xorq 0.3.28.
+Each test names the exact claim it pins. Verified against xorq 0.3.28.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from conftest import XorqCli
 
 
 # --- Ambient default precedence: env var > config file > built-in "default" ---
-# CLAUDE.md: "A bare `xorq catalog …` resolves the default catalog name with this
+# reference.md: "A bare `xorq catalog …` resolves the default catalog name with this
 # precedence: 1. XORQ_DEFAULT_CATALOG env var  2. ~/.config/xorq/catalog-default
 # 3. built-in 'default'."
 
@@ -70,7 +70,7 @@ def test_default_unset_reverts_to_builtin(xorq: XorqCli) -> None:
 
 
 # --- Per-command targeting: group flags, placement, combination rules ---
-# CLAUDE.md: "-n / -p / -u / -r are global flags on the `xorq catalog` group: they go
+# reference.md: "-n / -p / -u / -r are global flags on the `xorq catalog` group: they go
 # BEFORE the subcommand. -n<->-p and -n<->-u are mutually exclusive; -u may pair with -p
 # (clone destination); -r requires exactly one of -n/-u and cannot combine with -p."
 
@@ -82,14 +82,14 @@ def test_name_and_path_are_mutually_exclusive(xorq: XorqCli) -> None:
 
 
 def test_name_and_url_are_mutually_exclusive(xorq: XorqCli) -> None:
-    """CLAUDE.md: `-n` and `-u` are mutually exclusive (can't name a clone target)."""
+    """reference.md: `-n` and `-u` are mutually exclusive (can't name a clone target)."""
     r = xorq.run("catalog", "-n", "a", "-u", "https://example.com/r.git", "list", "--kind")
     assert r.code != 0
     assert "mutually exclusive" in r.output
 
 
 def test_root_repo_requires_name_or_url(xorq: XorqCli, tmp_path: Path) -> None:
-    """CLAUDE.md: `-r` must pair with exactly one of `-n`/`-u`, never `-p`.
+    """reference.md: `-r` must pair with exactly one of `-n`/`-u`, never `-p`.
 
     `-r`'s root is opened as a git repo, so it must be one (git init); pairing it with `-p`
     is then the rejected combination.
@@ -118,7 +118,7 @@ def test_group_flags_must_precede_the_subcommand(xorq: XorqCli, tmp_path: Path) 
 
 
 # --- No auto-create: a missing catalog errors with the exact fix, never silently created ---
-# CLAUDE.md: "The CLI does not auto-create catalogs; you init them explicitly."
+# reference.md: "The CLI does not auto-create catalogs; you init them explicitly."
 
 
 def test_missing_catalog_is_not_autocreated(xorq: XorqCli, tmp_path: Path) -> None:
@@ -131,7 +131,7 @@ def test_missing_catalog_is_not_autocreated(xorq: XorqCli, tmp_path: Path) -> No
 
 
 # --- Named-catalog location: ~/.local/share/xorq/catalogs/<name> ---
-# CLAUDE.md locations table: "Named catalogs root -> ~/.local/share/xorq/catalogs/<name>".
+# reference.md locations table: "Named catalogs root -> ~/.local/share/xorq/catalogs/<name>".
 
 
 def test_named_catalog_lives_under_xdg_data_home(xorq: XorqCli) -> None:

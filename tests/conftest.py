@@ -79,11 +79,11 @@ class XorqCli:
 
     @property
     def catalog_default_file(self) -> Path:
-        """The persisted default-name file (CLAUDE.md: ~/.config/xorq/catalog-default)."""
+        """The persisted default-name file (reference.md: ~/.config/xorq/catalog-default)."""
         return self.home / ".config" / "xorq" / "catalog-default"
 
     def named_catalog_dir(self, name: str) -> Path:
-        """Location of a named catalog (CLAUDE.md: ~/.local/share/xorq/catalogs/<name>)."""
+        """Location of a named catalog (reference.md: ~/.local/share/xorq/catalogs/<name>)."""
         return self.home / ".local" / "share" / "xorq" / "catalogs" / name
 
 
@@ -157,11 +157,11 @@ def build_duckdb_db(dest: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 PLUGIN_DIR = REPO / "xorq"
-CLAUDE_MD = PLUGIN_DIR / "CLAUDE.md"
 
-# The only steer we inject: headless `-p` has no human, but CLAUDE.md's Catalog
-# Resolution (Step 0) tells the model to *ask* how to resolve the catalog when none
-# exists. This removes that one blocker — it does NOT tell the model how to ingest.
+# The only steer we inject: headless `-p` has no human, but a skill's catalog
+# resolution tells the model to *ask* how to resolve the catalog when none exists.
+# This removes that one blocker — it does NOT tell the model how to ingest. The plugin
+# ships no CLAUDE.md; its SessionStart hook injects the shared kernel (skills/_shared/kernel.md).
 STEER = (
     "Non-interactive session: when a skill would ask the user a question, pick the "
     "recommended default and proceed without asking. For catalog resolution, create a "
@@ -238,7 +238,7 @@ class ClaudeRun:
     @property
     def said(self) -> str:
         prefix = "[session ended on is_error] " if self.is_error else ""
-        return prefix + str(self.result.get("result", ""))[:1500]
+        return prefix + str(self.result.get("result", ""))
 
     @property
     def answer(self) -> str:
@@ -392,13 +392,13 @@ def run_claude(
 ) -> Iterator[Callable[..., ClaudeRun]]:
     """Returns ``run(prompt, *, env_extra=None, timeout=300) -> ClaudeRun``.
 
-    Each call runs ``claude -p`` headless with the xorq plugin loaded and xorq/CLAUDE.md
-    injected, in the temp project (cwd). Per-test isolation (so the suite is safe under
+    Each call runs ``claude -p`` headless with the xorq plugin loaded, in the temp project
+    (cwd); the plugin's SessionStart hook injects the shared kernel (no ambient CLAUDE.md). Per-test isolation (so the suite is safe under
     ``pytest -n``): the catalog store + profiles via a redirected XDG home, and the parquet
     cache via a unique ``XORQ_CACHE_DIR`` under /tmp. HOME is left real so claude's own auth
     keeps working. The /tmp cache dir is removed on teardown.
     """
-    append = CLAUDE_MD.read_text() + "\n\n" + STEER
+    append = STEER  # plugin ships no CLAUDE.md; skills inject the shared kernel themselves
     # Optionally pin the model (e.g. XORQ_CLAUDE_PLUGIN_TEST_MODEL=sonnet to run the
     # Opus-slow llm suite faster/cheaper). Unset -> claude's session default.
     model = os.environ.get("XORQ_CLAUDE_PLUGIN_TEST_MODEL")

@@ -1,0 +1,15 @@
+{
+  "description": "Inject the xorq shared kernel (environment, catalog resolution, and the build-add / recover / verify idioms) into context once per session, so every xorq skill can rely on it without restating it. The kernel is the single source of truth in skills/_shared/kernel.md; printing it to stdout adds it to Claude's context. No matcher, so it also re-injects on resume / clear / compact.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat \"${CLAUDE_PLUGIN_ROOT}/skills/_shared/kernel.md\""
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -45,6 +45,6 @@ The plugin provides skills that guide Claude to use the `xorq` CLI via Bash. No 
 Claude --skills--> xorq CLI --subprocess--> xorq engine
 ```
 
-### Ambient context
+### Shared kernel
 
-`CLAUDE.md` provides Claude with background knowledge about xorq concepts (expressions, catalogs, ExprKind, TagHandlers, ML pipelines) so it can assist effectively even outside of explicit skill invocations.
+The plugin ships **no `CLAUDE.md`** — a plugin's root `CLAUDE.md` is never loaded into Claude's context. Instead, a **`SessionStart` hook** (`hooks/hooks.json`) prints `skills/_shared/kernel.md` into context once per session: one source of truth for the shared vocabulary (environment, catalog resolution, and the build→add / recover / verify idioms), present before any skill runs. It's the supported way to ship ambient plugin context — it fires on the plugin install alone, including in headless `claude -p`, so the e2e tests exercise the real mechanism. Deeper background lives in `skills/_shared/reference.md`, linked from the skills and read on demand.
