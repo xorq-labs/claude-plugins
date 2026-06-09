@@ -188,6 +188,35 @@ def postgres_reachable() -> bool:
         return False
 
 
+def _stream_tail(path: Path, n: int) -> str:
+    """Last ``n`` lines of a stream-json log, for legible timeout / no-result failures."""
+    if not path.exists():
+        return "(no stream log)"
+    lines = path.read_text(errors="replace").splitlines()
+    return "\n".join(lines[-n:]) if lines else "(empty stream log)"
+
+
+def _stream_result(path: Path) -> dict | None:
+    """The last ``{"type": "result", ...}`` event in a stream-json log, else ``None``.
+
+    Skips undecodable lines (a killed session can leave a half-written final line).
+    """
+    if not path.exists():
+        return None
+    result = None
+    for line in path.read_text(errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(ev, dict) and ev.get("type") == "result":
+            result = ev
+    return result
+
+
 @attrs.define
 class ClaudeRun:
     """Outcome of one headless claude session: the parsed result + where any catalog
@@ -379,6 +408,8 @@ def run_claude(
     xdg_config.mkdir()
     cache_dir = tempfile.mkdtemp(prefix="xorq-test-cache-", dir="/tmp")
 
+    runs = {"n": 0}
+
     def _run(prompt, *, env_extra=None, timeout=420) -> ClaudeRun:
         env = os.environ.copy()
         env.pop("XORQ_DEFAULT_CATALOG", None)
@@ -387,10 +418,17 @@ def run_claude(
         env["XORQ_CACHE_DIR"] = cache_dir
         if env_extra:
             env.update(env_extra)
+        # Stream events (`--verbose --output-format stream-json`) to a per-call log instead
+        # of buffering one final JSON blob. The plain `json` format emits nothing until the
+        # session ends, so a timeout leaves us with empty stdout and zero insight into where
+        # it hung; streaming to a file means a timeout can surface the last events it managed.
+        runs["n"] += 1
+        log_path = Path(cache_dir) / f"claude-stream-{runs['n']}.jsonl"
         argv = [
             claude_bin, "-p", str(prompt),
             "--plugin-dir", str(PLUGIN_DIR),
-            "--output-format", "json",
+            "--verbose",
+            "--output-format", "stream-json",
             # Grant the tools the ingest skill needs (Skill to load it, Bash to drive xorq,
             # Write for the ingest script) rather than bypassing permissions wholesale.
             "--allowedTools", "Bash Edit Write Read Glob Grep Skill",
@@ -398,24 +436,29 @@ def run_claude(
         ]
         if model:
             argv += ["--model", model]
-        try:
-            proc = subprocess.run(
-                argv, cwd=str(claude_project), env=env,
-                capture_output=True, text=True, timeout=timeout,
-            )
-        except subprocess.TimeoutExpired as e:
-            pytest.fail(f"claude -p timed out after {timeout}s\n{e.stdout}\n{e.stderr}")
+        with open(log_path, "w") as logf:
+            try:
+                proc = subprocess.run(
+                    argv, cwd=str(claude_project), env=env,
+                    stdout=logf, stderr=subprocess.PIPE, text=True, timeout=timeout,
+                )
+            except subprocess.TimeoutExpired as e:
+                tail = _stream_tail(log_path, 40)
+                pytest.fail(
+                    f"claude -p timed out after {timeout}s\n"
+                    f"--- last stream events ({log_path.name}) ---\n{tail}\n"
+                    f"--- stderr ---\n{(e.stderr or '')[-2000:]}"
+                )
         # NB: we deliberately do NOT assert proc.returncode == 0. A session can end on a
         # transient `is_error` (e.g. "API Error: socket connection closed") *after* the
         # skill already produced the catalog. The artifact is the source of truth, so let
         # the outcome assertions judge; the error text rides along in ClaudeRun.said for
         # legible failures when no catalog was in fact created.
-        try:
-            result = json.loads(proc.stdout)
-        except json.JSONDecodeError:
+        result = _stream_result(log_path)
+        if result is None:
             pytest.fail(
-                "claude did not return JSON "
-                f"(exit {proc.returncode}):\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}"
+                "claude stream had no result event "
+                f"(exit {proc.returncode}):\n{_stream_tail(log_path, 40)}\n{(proc.stderr or '')[-2000:]}"
             )
         return ClaudeRun(result=result, project=claude_project, xdg_data=xdg_data)
 

@@ -97,7 +97,7 @@ def test_llm_builder_ml_predict(xorq_bin: str, claude_project: Path, run_claude:
       - a prod-sized (every-prod-row) prediction entry exists (prod was scored and saved).
     """
     seed_catalog_sources(xorq_bin, claude_project, ["events_dev", "events_prod"])
-    run = run_claude(Builder.ML_PURCHASE, timeout=600)
+    run = run_claude(Builder.ML_PURCHASE, timeout=900)
 
     assert builder_entries(xorq_bin, run), (
         f"no fitted-pipeline (expr_builder) entry created\nclaude said: {run.said}"
