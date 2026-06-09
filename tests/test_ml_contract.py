@@ -14,7 +14,7 @@ Source data is tests/data/customers.csv (numeric `age` feature, categorical `tie
 fit over a resolvable absolute-path deferred read, seeded estimator, exactly as the skill
 prescribes). `catalog add` builds a wheel of this project, so tests run from the repo root in
 a wheel-buildable env; the round-trip uses `--use-this-venv` (sklearn is in this env — offline).
-Verified against xorq 0.3.28 + scikit-learn 1.9.
+Verified against xorq 0.3.29 + scikit-learn 1.9.
 """
 
 from __future__ import annotations

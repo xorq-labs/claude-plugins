@@ -67,7 +67,7 @@ def test_llm_ingest_duckdb(xorq_bin: str, claude_project: Path, run_claude: Call
     pytest.importorskip("duckdb")
     seed_duckdb(claude_project)
     run = run_claude(IngestData.DUCKDB)
-    # `catalog run` can't locate a materialized DuckDB entry's parquet in 0.3.28, so verify
+    # `catalog run` can't locate a materialized DuckDB entry's parquet in 0.3.29, so verify
     # the source + its schema only (don't execute it).
     assert_sources(xorq_bin, run, [file_schema(DATA / "customers.csv")], types=False, run_one=False)
 

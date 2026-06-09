@@ -56,7 +56,7 @@ xorq run "$(cat bp.txt)" -o - -f json --limit 5                  # current env, 
 xorq catalog run <alias> --use-this-venv -o - -f json --limit 5  # via the catalogued entry
 ```
 
-**DuckDB caveat (0.3.28):** `catalog run` can't locate a materialized DuckDB entry's parquet — preview
+**DuckDB caveat (0.3.29):** `catalog run` can't locate a materialized DuckDB entry's parquet — preview
 those with `xorq run "$(cat bp.txt)"` instead.
 
 ## Several sources
@@ -70,7 +70,7 @@ One `source` entry per file/table — run BUILD-ADD once per source, **one `cata
   `requirements.txt`) in a wheel-buildable env (`No module named 'packaging'` means it can't build wheels).
 - **Relative paths** → builds embed the path; use absolute paths for portable entries.
 - **Postgres secrets** → `${VAR}` references in the `Profile`, never literal passwords.
-- **DuckDB `catalog run`** → broken for materialized entries in 0.3.28; preview with `xorq run`.
+- **DuckDB `catalog run`** → broken for materialized entries in 0.3.29; preview with `xorq run`.
 
 ## Arguments
 

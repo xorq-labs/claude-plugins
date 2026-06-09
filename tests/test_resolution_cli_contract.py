@@ -6,7 +6,7 @@ on. This is intentionally *not* an exhaustive test of xorq — it is a **drift a
 of these fails, xorq's CLI changed and the kernel/reference must be updated so the vocabulary
 the skills inject stays accurate.
 
-Each test names the exact claim it pins. Verified against xorq 0.3.28.
+Each test names the exact claim it pins. Verified against xorq 0.3.29.
 """
 
 from __future__ import annotations

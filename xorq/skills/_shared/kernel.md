@@ -10,7 +10,7 @@ just the one the task seems to need:
 
 ```bash
 uv venv --python 3.13 && \
-  uv pip install 'xorq>=0.3.28' 'boring-semantic-layer>=0.3.14' 'scikit-learn>=1.9.0'
+  uv pip install 'xorq>=0.3.29' 'boring-semantic-layer>=0.3.14' 'scikit-learn>=1.9.0'
 ```
 
 then call `./.venv/bin/xorq`. Add backend extras (`xorq[duckdb]` / `[sqlite]` / `[postgres]`) as needed.

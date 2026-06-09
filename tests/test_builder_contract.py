@@ -12,7 +12,7 @@ an ``amount`` measure).
 
 ``catalog add`` builds a wheel of this project, so tests run from the repo root (pytest's rootdir)
 in a wheel-buildable env. The round-trip uses ``catalog run --use-this-venv`` (the current venv
-has BSL + its entry point) — offline, no isolated-env network. Verified against xorq 0.3.28.
+has BSL + its entry point) — offline, no isolated-env network. Verified against xorq 0.3.29.
 
 Pins SKILL.md §B (build -> add -> ``expr_builder``) and §A (``run -c
 'source.ls.builder.query(...).to_tagged()'`` -> rows). Skips cleanly when xorq / BSL / the fixture

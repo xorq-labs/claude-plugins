@@ -16,7 +16,7 @@ only on the file(s) it needs.
 `catalog add` builds a wheel of this project, so tests run from the repo root
 (pytest's rootdir) in a wheel-buildable env. Execution is checked with
 `xorq run <build>` (in-process, offline) — not `catalog run` (isolated uv env, needs
-the network). Verified against xorq 0.3.28.
+the network). Verified against xorq 0.3.29.
 """
 
 from __future__ import annotations

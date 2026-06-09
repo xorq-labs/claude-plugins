@@ -66,7 +66,7 @@ Run **VERIFY** (kernel). Expect kind **`composed`**; `catalog show <alias>` repo
 
 - **Transforms must be `unbound_expr`** (built over `xo.table(schema=…)`, not real data). The CLI
   does **not** reject a data-bearing (`source` / `composed`) entry passed as a transform — it
-  composes silently and contributes nothing (0.3.28), so the mistake surfaces only as missing
+  composes silently and contributes nothing (0.3.29), so the mistake surfaces only as missing
   transformation in the result.
 - **Always catalogs** — no build-only mode; use `--dry-run` to preview or `catalog run` to just execute.
 - **`--rename-params entry,old,new`** resolves an unbound-parameter name clash on a specific entry

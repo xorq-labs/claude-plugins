@@ -8,14 +8,15 @@ Pins:
                         "Composed from"
   - §B transforms    -> an expression over `xo.table(...)` catalogs as `unbound_expr` and
                         applies via `compose <src> <transform>`
-  - transform rule   -> a data-bearing (`source`) entry is rejected as a transform
+  - transform rule   -> a data-bearing (`source`) entry passed as a transform is silently
+                        accepted and contributes nothing (the pitfall the skill warns about)
   - schema rule      -> a transform whose `schema_in` isn't covered by the source fails,
                         naming the offending column
   - `--dry-run`      -> previews without cataloguing (claim: compose otherwise ALWAYS catalogs)
 
 Source data is tests/data/customers.csv. `catalog add` builds a wheel of this project, so tests
 run from the repo root in a wheel-buildable env; row checks use `--use-this-venv` (offline).
-Verified against xorq 0.3.28.
+Verified against xorq 0.3.29.
 """
 
 from __future__ import annotations

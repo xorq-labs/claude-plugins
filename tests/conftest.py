@@ -545,7 +545,7 @@ def assert_sources(
     events_prod) require two distinct entries, not one. ``types=False`` compares column
     names only (for DB-backed sources whose types vary by backend). ``run_one`` also
     executes one entry to prove the pipeline runs (skip where ``catalog run`` can't, e.g.
-    materialized DuckDB in 0.3.28).
+    materialized DuckDB in 0.3.29).
     """
     entries = source_entries(xorq_bin, run)
     assert entries, f"no source entry created\nclaude said: {run.said}"

@@ -14,7 +14,7 @@ Pins:
   - kernel pitfall -> `-c` is sandboxed: no imports, no builtins, no dunders
 
 Source data is tests/data/customers.csv; row checks use `--use-this-venv` (offline).
-Verified against xorq 0.3.28.
+Verified against xorq 0.3.29.
 """
 
 from __future__ import annotations
