@@ -1,5 +1,5 @@
 ---
-description: Fit, version, and run ML models on catalogued data — wrap an sklearn pipeline with Pipeline.from_instance, fit it over a catalogued expression to get a FittedPipeline, then predict / transform / predict_proba / score, and catalog the result as an expr_builder that round-trips via .ls.builder. Owns the model workflow; the generic tag/round-trip machinery lives in the builder skill.
+description: Fit, version, and run ML models on catalogued data — wrap an sklearn pipeline, fit it over an expression to get a FittedPipeline, then predict / transform / score, and catalog the result as a round-trippable expr_builder. Owns the model workflow; the generic tag/round-trip machinery lives in the builder skill.
 ---
 
 # ML — Fit, Version, and Run Models on Catalogued Data
@@ -106,18 +106,15 @@ This is **`builder`** §A applied to a fitted pipeline — see it for the genera
 
 ## Verify
 
-Run **VERIFY**. Expect:
-
-```bash
-xorq catalog list --kind        # expect: <hash>  expr_builder
-xorq catalog show <alias>       # "Type: Expression Builder", "Builders:" (type: fitted_pipeline, steps, target)
-```
+Run **VERIFY** (kernel). Expect kind **`expr_builder`**; `catalog show <alias>` reports
+"Type: Expression Builder" with a "Builders:" block (type: fitted_pipeline, steps, target).
+Confirm the round-trip with the RECOVER command from **B**.
 
 ## Pitfalls (ml-specific; shared ones are in the kernel)
 
 - **`predict`/`transform` are already tagged → use BUILD-ADD, NOT `catalog compose`.** Composing wraps
-  the tagged expr as a **`composed`** entry (the model stays recoverable via `.ls.builder`); to mint an
-  **`expr_builder`**, the response-method expr must be the **outermost** tag, i.e. the `expr` you build.
+  the tagged expr as a **`composed`** entry; to mint an **`expr_builder`**, the response-method expr
+  must be the `expr` you build (outermost-tag rule — see **`builder`** Pitfalls).
 - **Recovery reconstructs from the embedded training source.** `.ls.builder` re-derives the
   `FittedPipeline` from the training expression captured in the entry — so (a) fit over a **resolvable**
   source (a `deferred_read_*` of a stable absolute path, or a catalogued source), not a transient
@@ -129,5 +126,5 @@ xorq catalog show <alias>       # "Type: Expression Builder", "Builders:" (type:
 
 ## Arguments
 
-If the user provides arguments: $ARGUMENTS — treat them as the data + target to model (and any features
-/ estimator), and/or the target catalog (`-p` / `-n`).
+`$ARGUMENTS`: the data + target to model (and any features / estimator), and/or the target catalog
+(`-p` / `-n`).

@@ -13,6 +13,7 @@ skill.)
 The flow is **BUILD-ADD** with a one-line ingest expression bound to `expr`; only that expression
 changes per source. Builds are cheap for files (a `deferred_read_*` records the path; nothing is
 copied). Use `--builds-dir builds_source` so ingest builds can't collide; the entry's kind is `source`.
+(Heavier expression construction: the lightest-tool ladder in [reference.md](../_shared/reference.md).)
 
 
 ## Source templates — bind `expr`, then BUILD-ADD
@@ -48,12 +49,11 @@ expr = profile.get_con().table("<table_name>")   # ${...} resolved here, from th
 
 ## Verify
 
-Run **VERIFY**; expect `source`. Preview rows (`-o -` required):
+Run **VERIFY** (kernel). Expect kind **`source`**. Two ways to preview rows:
 
 ```bash
-xorq catalog list --kind                          # expect: <hash>  source
-xorq run "$(cat bp.txt)" -o - -f json --limit 5             # current env, universal
-xorq catalog run <alias> --use-this-venv -o - -f json --limit 5
+xorq run "$(cat bp.txt)" -o - -f json --limit 5                  # current env, universal
+xorq catalog run <alias> --use-this-venv -o - -f json --limit 5  # via the catalogued entry
 ```
 
 **DuckDB caveat (0.3.28):** `catalog run` can't locate a materialized DuckDB entry's parquet — preview
@@ -74,5 +74,4 @@ One `source` entry per file/table — run BUILD-ADD once per source, **one `cata
 
 ## Arguments
 
-If the user provides arguments: $ARGUMENTS — treat them as the data path(s) or DB table(s) to ingest,
-and/or the target catalog (`-p` / `-n`).
+`$ARGUMENTS`: the data path(s) or DB table(s) to ingest, and/or the target catalog (`-p` / `-n`).

@@ -55,16 +55,17 @@ second one — **confirm and adopt it as the session default**. One `AskUserQues
 **If no catalog exists**, tell them: *xorq ships with a built-in `default` catalog, so everything works
 now — but we recommend creating your own for your data.* Ask one `AskUserQuestion`:
 
-- **"Create a catalog for your data?"** (recommended) — if yes, create it **repo-local** in the
-  project: `xorq catalog -p ./<name> init` (suggest the repo name), then pass `-p ./<name>` per command.
-  (Prefer a *named* global catalog? `xorq catalog -n <name> init`, then `XORQ_DEFAULT_CATALOG=<name>` /
-  `-n <name>`.) If no, use the built-in `default`.
+- **"Create a named catalog for your data?"** (recommended) — if yes, pick a name (suggest the repo
+  name) and `xorq catalog -n <name> init`, then carry it per command with `XORQ_DEFAULT_CATALOG=<name>`
+  (or `-n <name>`). If they'd rather not have a global named catalog, create it **repo-local** instead:
+  `xorq catalog -p ./<name> init`, then pass `-p ./<name>` per command (keeps the data with the
+  project, out of `~/.local/share`). If no catalog at all, use the built-in `default`.
 
-A repo-local catalog is targeted with `-p ./<name>`; a named one is **session-only** via
-`XORQ_DEFAULT_CATALOG=<name>` per command — never persist with `xorq catalog default --set`
-(machine-global, leaks into every other shell/project/CI). Non-interactive (`claude -p`, no
-`AskUserQuestion`): adopt the existing catalog if one is present, else create a repo-local one —
-`xorq catalog -p ./<name> init` (repo name) — and use `-p ./<name>`; state it.
+A named catalog's default is **session-only** via `XORQ_DEFAULT_CATALOG=<name>` per command — never
+persist with `xorq catalog default --set` (machine-global, leaks into every other shell/project/CI);
+a repo-local one is targeted with `-p ./<name>`. Non-interactive (`claude -p`, no `AskUserQuestion`):
+adopt the existing catalog if one is present, else create a named one — `xorq catalog -n <name> init`
+(repo name) — and prefix commands with `XORQ_DEFAULT_CATALOG=<name>`; state it.
 
 ## Catalog locations
 

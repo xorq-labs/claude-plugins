@@ -1,5 +1,5 @@
 ---
-description: Round-trip xorq ExprBuilders through the catalog — an expr whose outermost tag carries domain metadata ("an expr that builds exprs"). Recover the live builder object from a catalogued entry to make new exprs, build/originate builder entries, and author custom TagHandlers so your own objects round-trip. Covers semantic models, fitted pipelines, and custom builders generically; for fitting/predicting models use the ml skill.
+description: Round-trip xorq ExprBuilders through the catalog — recover the live builder object from a catalogued entry to make new exprs, build/originate builder entries, and author custom TagHandlers so your own objects round-trip. Covers semantic models, fitted pipelines, and custom builders; for fitting/predicting models use the ml skill.
 ---
 
 # Builder — Round-Trip ExprBuilders Through the Catalog
@@ -111,28 +111,19 @@ discovered automatically in every process.
 
 ## Verify
 
-Run **VERIFY**. For a builder entry, expect:
-
-```bash
-xorq catalog list --kind        # expect: <hash>  expr_builder
-xorq catalog show <alias>       # "Type: Expression Builder", "Root tag:", a "Builders:" block
-xorq catalog run <alias> -c 'source.ls.builder.<method>(<params>).to_tagged()' \
-  -o - -f json --limit 5                  # round-trips: recovers the builder and re-queries
-```
-
-`expr.ls.expr_traits.has_builders` is a cheap in-process predicate.
+Run **VERIFY** (kernel). Expect kind **`expr_builder`**; `catalog show <alias>` reports
+"Type: Expression Builder", "Root tag:", and a "Builders:" block. Confirm the round-trip with the
+RECOVER command from **A**. (`expr.ls.expr_traits.has_builders` is a cheap in-process predicate.)
 
 ## Pitfalls (builder-specific; shared ones are in the kernel)
 
-- **Outermost-tag-only detection.** The kind is the **outermost recognized** builder tag. An
-  unrecognized tag is decorative — the entry classifies as its underlying kind (`source` / `expr`).
-  Wrapping a builder (e.g. via `catalog compose`) yields a `composed` entry; the builder is still
-  recoverable underneath via `.ls.builder`. To mint an `expr_builder`, use **B**.
-- **Registration scope is process-local.** `register_tag_handler(...)` lasts only for the current
-  process. `build` / `catalog add` / `catalog run` are **separate** processes, so a custom handler must
-  be installed as a **`xorq.from_tag_node` entry point** in the build's environment — otherwise
-  `.ls.builder` raises `No builder tags found in expression`. The **sidecar** (`extract_metadata`) is
-  captured at add time and always reads back; only **live recovery** (`from_tag_node`) needs the handler.
+- **Only the outermost recognized tag sets the kind.** An unrecognized tag is decorative (the entry
+  classifies as `source` / `expr`); wrapping a builder (e.g. via `catalog compose`) yields `composed`,
+  with the builder still recoverable via `.ls.builder`. To mint an `expr_builder`, use **B**.
+- **Registration is process-local.** `build` / `catalog add` / `catalog run` are separate processes, so
+  a custom handler must ship as a **`xorq.from_tag_node` entry point** (C) — else `.ls.builder` raises
+  `No builder tags found in expression`. The sidecar (`extract_metadata`) is captured at add time and
+  always reads back; only live recovery (`from_tag_node`) needs the handler.
 - **`from_tag_node` reconstructs only what the tag captured** — store everything the rebuild needs in
   `.tag(...)` metadata.
 - **Tag-key collisions** — a duplicate `tag_names` registration raises (`override=True` to replace);
@@ -140,5 +131,4 @@ xorq catalog run <alias> -c 'source.ls.builder.<method>(<params>).to_tagged()' \
 
 ## Arguments
 
-If the user provides arguments: $ARGUMENTS — treat them as the builder entry to round-trip (recover +
-re-query, or persist a re-parameterized variant), and/or the target catalog (`-p` / `-n`).
+`$ARGUMENTS`: the builder entry to round-trip, and/or the target catalog (`-p` / `-n`).

@@ -48,7 +48,7 @@ xorq catalog show <alias> --raw      # the metadata sidecar verbatim (YAML)
 
 ## 4. Preview rows (read-only execution)
 
-`run` composes-and-executes an entry without persisting. **`-o -` required**:
+`run` composes-and-executes an entry without persisting (`-o -`, per kernel):
 
 ```bash
 xorq catalog run <alias> -o - -f json --limit 5   # one JSON object per row
@@ -63,7 +63,7 @@ xorq catalog check          # validate consistency -> "OK"
 
 (Interactive browsing for humans, not headless agents: `xorq catalog tui`.)
 
-## Verifying a build (the VERIFY vocabulary)
+## Verify (the VERIFY vocabulary)
 
 The canonical post-build checks the other skills point back to:
 
@@ -88,5 +88,4 @@ The Python mirror (`cat.get_catalog_entry(...)` + sidecar `.kind` / `.columns` /
 
 ## Arguments
 
-If the user provides arguments: $ARGUMENTS — treat them as the catalog to explore (`-p` / `-n`) and/or
-the entry or alias to inspect.
+`$ARGUMENTS`: the entry or alias to inspect, and/or the catalog to explore (`-p` / `-n`).

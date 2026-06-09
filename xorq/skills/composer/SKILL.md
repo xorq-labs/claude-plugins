@@ -1,5 +1,5 @@
 ---
-description: Compose a new catalog entry from data already in the catalog — take a source entry, optionally apply reusable transform entries and/or an inline xorq expression, then build and catalog the result in one step (ExprKind "composed"). Use when the inputs already live in a catalog; for raw files/tables use ingest, for fitting models use ml.
+description: Compose a new catalog entry from data already in the catalog — apply reusable transform entries and/or an inline xorq expression to a source entry, building and cataloguing the result in one step (kind "composed"). Use when the inputs already live in a catalog; for raw files/tables use ingest, for fitting models use ml.
 ---
 
 # Composer — Compose a New Entry from Catalogued Expressions
@@ -58,23 +58,21 @@ not `composed`. See the lightest-tool ladder in [reference.md](../_shared/refere
 
 ## Verify
 
-Run **VERIFY**; expect `composed`. `--dry-run` previews the plan + result schema without building;
-`compose` otherwise always catalogs (to execute without an entry, use `xorq catalog run`).
-
-```bash
-xorq catalog list --kind        # expect: <hash>  composed
-xorq catalog show <alias>       # "Composed from: N"
-```
+Run **VERIFY** (kernel). Expect kind **`composed`**; `catalog show <alias>` reports "Composed from: N".
+`--dry-run` previews the plan + result schema without building; `compose` otherwise always catalogs
+(to execute without an entry, use `xorq catalog run`).
 
 ## Pitfalls (composer-specific; shared ones are in the kernel)
 
-- **Transforms must be `unbound_expr`** (built over `xo.table(schema=…)`, not real data). A
-  `source` / `composed` entry can only be the *source*, never a transform.
+- **Transforms must be `unbound_expr`** (built over `xo.table(schema=…)`, not real data). The CLI
+  does **not** reject a data-bearing (`source` / `composed`) entry passed as a transform — it
+  composes silently and contributes nothing (0.3.28), so the mistake surfaces only as missing
+  transformation in the result.
 - **Always catalogs** — no build-only mode; use `--dry-run` to preview or `catalog run` to just execute.
 - **`--rename-params entry,old,new`** resolves an unbound-parameter name clash on a specific entry
   (repeatable); only needed when chained transforms collide on a param name.
 
 ## Arguments
 
-If the user provides arguments: $ARGUMENTS — treat them as the source entry plus any transform entries
-and/or inline expression to compose, and/or the target catalog (`-p` / `-n`).
+`$ARGUMENTS`: the source entry plus any transform entries / inline expression, and/or the target
+catalog (`-p` / `-n`).
