@@ -111,11 +111,11 @@ discovered automatically in every process.
 
 ## Verify
 
-Run **VERIFY** (kernel). Expect kind **`expr_builder`**; `catalog show <alias>` reports
+Run **VERIFY** (essentials). Expect kind **`expr_builder`**; `catalog show <alias>` reports
 "Type: Expression Builder", "Root tag:", and a "Builders:" block. Confirm the round-trip with the
 RECOVER command from **A**. (`expr.ls.expr_traits.has_builders` is a cheap in-process predicate.)
 
-## Pitfalls (builder-specific; shared ones are in the kernel)
+## Pitfalls (builder-specific; shared ones are in the essentials)
 
 - **Only the outermost recognized tag sets the kind.** An unrecognized tag is decorative (the entry
   classifies as `source` / `expr`); wrapping a builder (e.g. via `catalog compose`) yields `composed`,

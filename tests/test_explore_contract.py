@@ -1,5 +1,5 @@
-"""Contract tests for the `catalog-explore` skill's read-only vocabulary and the kernel's
-`run` pitfalls (xorq/skills/catalog-explore/SKILL.md + skills/_shared/kernel.md).
+"""Contract tests for the `catalog-explore` skill's read-only vocabulary and the essentials'
+`run` pitfalls (xorq/skills/catalog-explore/SKILL.md + skills/_shared/essentials.md).
 
 Drift alarm, NOT a re-test of xorq: pins exactly the call-outs those docs make, so a version
 bump that changes them fails here and the docs must be updated.
@@ -9,9 +9,9 @@ Pins:
                       hashes; aliases are the names that point at them")
   - `schema --json`-> parses as JSON carrying `schema_out` (the VERIFY schema check)
   - `check` / `log`-> `check` validates ("OK"); `log` shows the replay ops (`add`)
-  - kernel pitfall -> `-o -` is REQUIRED for `run` previews; without it output goes to
+  - essentials pitfall -> `-o -` is REQUIRED for `run` previews; without it output goes to
                       /dev/null (no rows on stdout)
-  - kernel pitfall -> `-c` is sandboxed: no imports, no builtins, no dunders
+  - essentials pitfall -> `-c` is sandboxed: no imports, no builtins, no dunders
 
 Source data is tests/data/customers.csv; row checks use `--use-this-venv` (offline).
 Verified against xorq 0.3.29.
@@ -83,7 +83,7 @@ def test_check_ok_and_log_shows_ops(xorq_bin: str, explore_cat: tuple) -> None:
 
 
 def test_run_without_dash_o_emits_no_rows(xorq_bin: str, explore_cat: tuple) -> None:
-    """Kernel pitfall: `-o -` is REQUIRED for previews — without it, output defaults to
+    """Essentials pitfall: `-o -` is REQUIRED for previews — without it, output defaults to
     /dev/null and no rows reach stdout."""
     cat, _, alias = explore_cat
     base = ("catalog", "-p", cat, "run", alias, "--use-this-venv", "-f", "json", "--limit", "3")
@@ -95,7 +95,7 @@ def test_run_without_dash_o_emits_no_rows(xorq_bin: str, explore_cat: tuple) -> 
 
 
 def test_c_namespace_is_sandboxed(xorq_bin: str, explore_cat: tuple) -> None:
-    """Kernel pitfall: `-c` sees only `source` / `xo` / `ibis` — no builtins, no imports,
+    """Essentials pitfall: `-c` sees only `source` / `xo` / `ibis` — no builtins, no imports,
     no dunders."""
     cat, _, alias = explore_cat
     for code in ('__import__("os").getcwd()', 'open("/etc/hostname")'):

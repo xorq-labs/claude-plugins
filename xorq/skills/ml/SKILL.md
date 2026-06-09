@@ -106,11 +106,11 @@ This is **`builder`** §A applied to a fitted pipeline — see it for the genera
 
 ## Verify
 
-Run **VERIFY** (kernel). Expect kind **`expr_builder`**; `catalog show <alias>` reports
+Run **VERIFY** (essentials). Expect kind **`expr_builder`**; `catalog show <alias>` reports
 "Type: Expression Builder" with a "Builders:" block (type: fitted_pipeline, steps, target).
 Confirm the round-trip with the RECOVER command from **B**.
 
-## Pitfalls (ml-specific; shared ones are in the kernel)
+## Pitfalls (ml-specific; shared ones are in the essentials)
 
 - **`predict`/`transform` are already tagged → use BUILD-ADD, NOT `catalog compose`.** Composing wraps
   the tagged expr as a **`composed`** entry; to mint an **`expr_builder`**, the response-method expr

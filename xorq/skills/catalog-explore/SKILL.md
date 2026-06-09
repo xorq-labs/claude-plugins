@@ -6,20 +6,20 @@ description: Find and inspect xorq catalogs read-only — discover which catalog
 
 Discover which catalogs exist, then look inside one: list entries and aliases, show an entry's metadata
 and schema, preview rows, read history. Everything here is **read-only** — it never changes the catalog.
-This is also the **verification vocabulary** the other skills lean on (the kernel's VERIFY points here):
+This is also the **verification vocabulary** the other skills lean on (the essentials' VERIFY points here):
 after an `ingest` / `composer` / `ml` build, confirm the result with `list --kind`, `schema`, `show`,
 and a `run` preview.
 
 **Read-only commands only:** `info` · `list` · `list-aliases` · `show` · `schema` · `log` · `check` ·
 `default` (no flags) · `run` (executes, adds nothing). **Never** `add` / `remove` / `add-alias` /
 `remove-alias` / `compose` / `init` / `clone` / `pull` / `push` / `sync` / `set-remote` — those mutate
-(to create entries use `ingest` / `composer` / `ml`). The kernel's BUILD-ADD / RECOVER are for those
+(to create entries use `ingest` / `composer` / `ml`). The essentials' BUILD-ADD / RECOVER are for those
 skills; here, only read.
 
 
 ## 1. Find a catalog
 
-Resolution (which catalog; the flags / env var) is in the kernel. To see what you're pointed at:
+Resolution (which catalog; the flags / env var) is in the essentials. To see what you're pointed at:
 
 ```bash
 xorq catalog default   # the default's NAME and source -> "default  (source: built-in)"
@@ -48,7 +48,7 @@ xorq catalog show <alias> --raw      # the metadata sidecar verbatim (YAML)
 
 ## 4. Preview rows (read-only execution)
 
-`run` composes-and-executes an entry without persisting (`-o -`, per kernel):
+`run` composes-and-executes an entry without persisting (`-o -`, per essentials):
 
 ```bash
 xorq catalog run <alias> -o - -f json --limit 5   # one JSON object per row
@@ -77,7 +77,7 @@ xorq catalog run <alias> -o - -f json --limit 5   # expect rows
 The Python mirror (`cat.get_catalog_entry(...)` + sidecar `.kind` / `.columns` / `.schema_out`) is in
 [reference.md](../_shared/reference.md).
 
-## Pitfalls (explore-specific; shared ones are in the kernel)
+## Pitfalls (explore-specific; shared ones are in the essentials)
 
 - **No auto-create.** Read commands never initialize a catalog; a missing target fails with a clear
   "Catalog not found … run `init`" message.

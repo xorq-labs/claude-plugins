@@ -1,9 +1,9 @@
-"""Contract tests for the xorq CLI behaviors the shared kernel/reference rely on.
+"""Contract tests for the xorq CLI behaviors the shared essentials/reference rely on.
 
-Scope: ONLY the behaviors that ``skills/_shared/kernel.md`` (catalog resolution) and
+Scope: ONLY the behaviors that ``skills/_shared/essentials.md`` (catalog resolution) and
 ``skills/_shared/reference.md`` (the flag / precedence / locations detail) explicitly rely
 on. This is intentionally *not* an exhaustive test of xorq — it is a **drift alarm**. If one
-of these fails, xorq's CLI changed and the kernel/reference must be updated so the vocabulary
+of these fails, xorq's CLI changed and the essentials/reference must be updated so the vocabulary
 the skills inject stays accurate.
 
 Each test names the exact claim it pins. Verified against xorq 0.3.29.

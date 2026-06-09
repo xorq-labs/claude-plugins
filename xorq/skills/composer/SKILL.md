@@ -26,7 +26,7 @@ xorq catalog compose <source> \
 ```
 
 Reference columns as `source.<col>` or `source['<col>']`; chain xorq ops freely. The `-c` namespace is
-sandboxed (see kernel) — for anything heavier than an expression chain, make a transform (B).
+sandboxed (see essentials) — for anything heavier than an expression chain, make a transform (B).
 
 ## B. Reusable transform entries — versioned, schema-checked
 
@@ -58,11 +58,11 @@ not `composed`. See the lightest-tool ladder in [reference.md](../_shared/refere
 
 ## Verify
 
-Run **VERIFY** (kernel). Expect kind **`composed`**; `catalog show <alias>` reports "Composed from: N".
+Run **VERIFY** (essentials). Expect kind **`composed`**; `catalog show <alias>` reports "Composed from: N".
 `--dry-run` previews the plan + result schema without building; `compose` otherwise always catalogs
 (to execute without an entry, use `xorq catalog run`).
 
-## Pitfalls (composer-specific; shared ones are in the kernel)
+## Pitfalls (composer-specific; shared ones are in the essentials)
 
 - **Transforms must be `unbound_expr`** (built over `xo.table(schema=…)`, not real data). The CLI
   does **not** reject a data-bearing (`source` / `composed`) entry passed as a transform — it

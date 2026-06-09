@@ -161,7 +161,7 @@ PLUGIN_DIR = REPO / "xorq"
 # The only steer we inject: headless `-p` has no human, but a skill's catalog
 # resolution tells the model to *ask* how to resolve the catalog when none exists.
 # This removes that one blocker — it does NOT tell the model how to ingest. The plugin
-# ships no CLAUDE.md; its SessionStart hook injects the shared kernel (skills/_shared/kernel.md).
+# ships no CLAUDE.md; its SessionStart hook injects the shared essentials (skills/_shared/essentials.md).
 STEER = (
     "Non-interactive session: when a skill would ask the user a question, pick the "
     "recommended default and proceed without asking. For catalog resolution, create a "
@@ -393,12 +393,12 @@ def run_claude(
     """Returns ``run(prompt, *, env_extra=None, timeout=300) -> ClaudeRun``.
 
     Each call runs ``claude -p`` headless with the xorq plugin loaded, in the temp project
-    (cwd); the plugin's SessionStart hook injects the shared kernel (no ambient CLAUDE.md). Per-test isolation (so the suite is safe under
+    (cwd); the plugin's SessionStart hook injects the shared essentials (no ambient CLAUDE.md). Per-test isolation (so the suite is safe under
     ``pytest -n``): the catalog store + profiles via a redirected XDG home, and the parquet
     cache via a unique ``XORQ_CACHE_DIR`` under /tmp. HOME is left real so claude's own auth
     keeps working. The /tmp cache dir is removed on teardown.
     """
-    append = STEER  # plugin ships no CLAUDE.md; skills inject the shared kernel themselves
+    append = STEER  # plugin ships no CLAUDE.md; skills inject the shared essentials themselves
     # Optionally pin the model (e.g. XORQ_CLAUDE_PLUGIN_TEST_MODEL=sonnet to run the
     # Opus-slow llm suite faster/cheaper). Unset -> claude's session default.
     model = os.environ.get("XORQ_CLAUDE_PLUGIN_TEST_MODEL")

@@ -45,7 +45,7 @@ def _build_add(xorq_bin: str, tmp: Path, cat: Path, name: str, script: str, alia
     r = _run(xorq_bin, "build", tmp / f"{name}.py",
              "--builds-dir", tmp / f"builds_{name}", "--emit-build-path-to", bp)
     assert r.returncode == 0, r.stderr
-    # Kernel pitfall: compose merges the entries' bundles, so wheels of this project must be
+    # Essentials pitfall: compose merges the entries' bundles, so wheels of this project must be
     # byte-identical across `add`s — pin SOURCE_DATE_EPOCH for reproducible wheels, else
     # compose fails with "wheel collision".
     r = _run(xorq_bin, "catalog", "-p", cat, "add", bp.read_text().strip(), "-a", alias,

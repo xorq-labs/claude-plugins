@@ -1,6 +1,6 @@
 # xorq reference (depth — read on demand)
 
-Background the [kernel](kernel.md) doesn't carry. Read this only when a task needs the detail.
+Background the [essentials](essentials.md) doesn't carry. Read this only when a task needs the detail.
 
 ## Catalog targeting flags
 
@@ -77,7 +77,7 @@ adopt the existing catalog if one is present, else create a named one — `xorq 
 
 ## Building expressions — the lightest-tool ladder
 
-Every entry bottoms out in **BUILD-ADD** (see kernel). Construct the expression with the lightest tool
+Every entry bottoms out in **BUILD-ADD** (see essentials). Construct the expression with the lightest tool
 that works, and climb only as the task demands:
 
 1. **CLI inline** *(prefer)* — `xorq catalog compose <src> -c "source.filter(…)"`, or an `ingest`

@@ -49,7 +49,7 @@ expr = profile.get_con().table("<table_name>")   # ${...} resolved here, from th
 
 ## Verify
 
-Run **VERIFY** (kernel). Expect kind **`source`**. Two ways to preview rows:
+Run **VERIFY** (essentials). Expect kind **`source`**. Two ways to preview rows:
 
 ```bash
 xorq run "$(cat bp.txt)" -o - -f json --limit 5                  # current env, universal
@@ -63,12 +63,12 @@ those with `xorq run "$(cat bp.txt)"` instead.
 
 One `source` entry per file/table — run BUILD-ADD once per source, **one `catalog add` at a time**.
 
-## Pitfalls (ingest-specific; shared ones are in the kernel)
+## Pitfalls (ingest-specific; shared ones are in the essentials)
 
 - **Missing driver** → install the `xorq[<backend>]` extra (above).
 - **`catalog add` environment** → run from a dir with `pyproject.toml` + a lockfile (`uv.lock` /
   `requirements.txt`) in a wheel-buildable env. `No module named 'packaging'` = xorq's wheel-bundling
-  path imports `packaging` without declaring it (0.3.29) — `pip install packaging` (kernel install
+  path imports `packaging` without declaring it (0.3.29) — `pip install packaging` (essentials install
   line includes it).
 - **Relative paths** → builds embed the path; use absolute paths for portable entries.
 - **Postgres secrets** → `${VAR}` references in the `Profile`, never literal passwords.

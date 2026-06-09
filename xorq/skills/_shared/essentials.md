@@ -1,4 +1,4 @@
-**xorq essentials (shared kernel).** xorq writes engine-agnostic lazy expressions and versions
+**xorq essentials (shared, session-injected).** xorq writes engine-agnostic lazy expressions and versions
 them as content-addressed artifacts in a git-backed **catalog**. Every skill assumes the vocabulary
 below; the plugin's SessionStart hook injects it once per session, so skills don't restate it.
 
