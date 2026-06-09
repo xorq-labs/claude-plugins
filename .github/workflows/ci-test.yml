@@ -52,9 +52,26 @@ jobs:
       - name: Run LLM e2e suite
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Pin the e2e model (conftest reads this -> `claude --model`); Opus for correctness,
+          # its extra latency covered by the thread-cap fix + 900s timeout margin.
+          XORQ_CLAUDE_PLUGIN_TEST_MODEL: opus
           POSTGRES_HOST: localhost
           POSTGRES_PORT: "5432"
           POSTGRES_DB: xorq
           POSTGRES_USER: xorq
           POSTGRES_PASSWORD: xorq
-        run: uv run pytest -m llm -q -n auto
+          # Cap native thread pools so concurrent agent subtrees can't oversubscribe / deadlock.
+          # Each `claude -p` spawns xorq (tokio runtime, honors TOKIO_WORKER_THREADS) + sklearn
+          # (fork-unsafe OpenBLAS pthreads); under -n parallelism every pool would otherwise size
+          # to core count, N times over. These reach every xorq subprocess via the inherited env.
+          OMP_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+          VECLIB_MAXIMUM_THREADS: "1"
+          TOKIO_WORKER_THREADS: "2"
+          RAYON_NUM_THREADS: "2"
+        # Bounded parallelism (not -n auto): fewer concurrent native-thread-heavy agent
+        # subtrees, the other half of the oversubscription fix. Suite has ample headroom
+        # under the 30-min job ceiling.
+        run: uv run pytest -m llm -q -n 4
