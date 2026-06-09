@@ -41,18 +41,30 @@ don't `export` it (each `Bash` call is a fresh shell, so an export is gone next 
 every other shell / project / CI run). If the *user* has already set a default (their env or persisted
 file), honor it with bare commands; otherwise carry the catalog explicitly on each command.
 
-## Onboarding a user with no catalog (interactive)
+## Onboarding (interactive) — adopt an existing catalog, or create one
 
-Tell them: *xorq ships with a built-in `default` catalog, so everything works now — but we recommend
-creating your own for your data.* Ask one short `AskUserQuestion`:
+**If a catalog already exists** (the user just cloned a remote with `xorq catalog -u <url>`, there's a
+repo-local `catalog.yaml`, or a named catalog is present), don't silently use it and don't create a
+second one — **confirm and adopt it as the session default**. One `AskUserQuestion`:
 
-- **"Create a named catalog for your data?"** (recommended) — if yes, pick a name (suggest the repo
-  name) and `xorq catalog -n <name> init`, then carry it per command with `XORQ_DEFAULT_CATALOG=<name>`
-  (or `-n <name>`). If no, use the built-in `default`.
+- **"Use catalog `<name>` as the default for this session?"** (recommended) — if yes, carry it per
+  command with `XORQ_DEFAULT_CATALOG=<name>` (or `-p <path>` if it's path-only). If it has no name
+  (path-only), ask for one in the same step or fall back to the repo name. If no, keep targeting it
+  explicitly per command with `-p`/`-n` and don't make it the session default.
 
-Don't offer to persist a default with `--set` (machine-global, persistent). Non-interactive
-(`claude -p`, no `AskUserQuestion`): auto-generate a name (the repo name), `xorq catalog -n <name> init`
-it, and prefix commands with `XORQ_DEFAULT_CATALOG=<name>`; state it.
+**If no catalog exists**, tell them: *xorq ships with a built-in `default` catalog, so everything works
+now — but we recommend creating your own for your data.* Ask one `AskUserQuestion`:
+
+- **"Create a catalog for your data?"** (recommended) — if yes, create it **repo-local** in the
+  project: `xorq catalog -p ./<name> init` (suggest the repo name), then pass `-p ./<name>` per command.
+  (Prefer a *named* global catalog? `xorq catalog -n <name> init`, then `XORQ_DEFAULT_CATALOG=<name>` /
+  `-n <name>`.) If no, use the built-in `default`.
+
+A repo-local catalog is targeted with `-p ./<name>`; a named one is **session-only** via
+`XORQ_DEFAULT_CATALOG=<name>` per command — never persist with `xorq catalog default --set`
+(machine-global, leaks into every other shell/project/CI). Non-interactive (`claude -p`, no
+`AskUserQuestion`): adopt the existing catalog if one is present, else create a repo-local one —
+`xorq catalog -p ./<name> init` (repo name) — and use `-p ./<name>`; state it.
 
 ## Catalog locations
 
