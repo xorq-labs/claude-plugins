@@ -152,3 +152,21 @@ def test_postgres_profile_stores_env_refs_not_secrets() -> None:
     ))
     with pytest.raises(ValueError):
         check_for_exposed_secrets("postgres", leaky.kwargs_dict)
+
+
+def test_packaging_is_an_undeclared_xorq_dependency() -> None:
+    """Pitfall pin: xorq's `catalog add` wheel-bundling path (ibis_yaml/packager.py, pep723.py)
+    imports `packaging` but xorq does NOT declare it as a dependency (0.3.29) — so a bare
+    `pip install xorq` env can fail `catalog add` with `No module named 'packaging'`. The
+    kernel's install line therefore adds `packaging` explicitly.
+
+    This pins the ABSENCE: when xorq starts declaring `packaging`, this test flips and the
+    kernel/ingest workaround wording can be dropped.
+    """
+    from importlib.metadata import requires
+
+    declared = [r.split()[0].split(">")[0].split("=")[0] for r in (requires("xorq") or [])]
+    assert "packaging" not in declared, (
+        "xorq now declares `packaging` — drop the explicit install from the kernel's "
+        "Environment section and soften the ingest pitfall"
+    )

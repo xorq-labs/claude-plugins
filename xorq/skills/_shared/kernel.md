@@ -10,8 +10,11 @@ just the one the task seems to need:
 
 ```bash
 uv venv --python 3.13 && \
-  uv pip install 'xorq>=0.3.29' 'boring-semantic-layer>=0.3.14' 'scikit-learn>=1.9.0'
+  uv pip install 'xorq>=0.3.29' 'boring-semantic-layer>=0.3.14' 'scikit-learn>=1.9.0' packaging
 ```
+
+(`packaging` is an undeclared import of xorq's `catalog add` wheel-bundling path — without it a
+bare env fails with `No module named 'packaging'`.)
 
 then call `./.venv/bin/xorq`. Add backend extras (`xorq[duckdb]` / `[sqlite]` / `[postgres]`) as needed.
 

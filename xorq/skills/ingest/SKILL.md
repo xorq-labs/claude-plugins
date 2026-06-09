@@ -67,7 +67,9 @@ One `source` entry per file/table — run BUILD-ADD once per source, **one `cata
 
 - **Missing driver** → install the `xorq[<backend>]` extra (above).
 - **`catalog add` environment** → run from a dir with `pyproject.toml` + a lockfile (`uv.lock` /
-  `requirements.txt`) in a wheel-buildable env (`No module named 'packaging'` means it can't build wheels).
+  `requirements.txt`) in a wheel-buildable env. `No module named 'packaging'` = xorq's wheel-bundling
+  path imports `packaging` without declaring it (0.3.29) — `pip install packaging` (kernel install
+  line includes it).
 - **Relative paths** → builds embed the path; use absolute paths for portable entries.
 - **Postgres secrets** → `${VAR}` references in the `Profile`, never literal passwords.
 - **DuckDB `catalog run`** → broken for materialized entries in 0.3.29; preview with `xorq run`.
