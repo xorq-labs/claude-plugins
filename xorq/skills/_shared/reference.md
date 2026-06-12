@@ -110,6 +110,8 @@ content). The CLI mirror — `xorq catalog list / show / schema` — is the **ca
 | `XORQ_CACHE_DIR` | Parquet cache directory | `~/.cache/xorq` |
 | `XORQ_PROFILE_DIR` | Connection profiles directory | `~/.config/xorq/profiles` |
 | `XORQ_DEFAULT_RELATIVE_PATH` | Default relative path for cached data | `parquet` |
+| `XORQ_RUNS_LOGS_DIR` | Run-log store (`run.jsonl` + `meta.json` per run — the **diagnose** skill) | `~/.local/share/xorq/runs` |
+| `OTEL_EXPORTER_CONSOLE_FALLBACK` | `1` → print OTel spans (incl. `cache.hit` / `cache.miss`) to stdout when no collector is up | unset |
 | `XORQ_DEBUG` | Verbose debug output | `False` |
 | `XORQ_LOG_LEVEL` | File-log level (`DEBUG`…`CRITICAL`/`OFF`) | `INFO` |
 | `XORQ_CATALOG_S3_*`, `XORQ_CATALOG_DIRECTORY_*`, `XORQ_CATALOG_RSYNC_*` | git-annex special-remote config for catalogs with remote archives (`xorq catalog init --env-prefix … --env-file …`, `embed-readonly`) | — |
