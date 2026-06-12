@@ -31,10 +31,11 @@ claude --plugin-dir ./xorq
 
 | Skill | Description |
 |-------|-------------|
-| `/xorq:init` | Ingest CSV/Parquet files into a catalog |
-| `/xorq:composer` | Compose catalog entries into new aliased expressions |
-| `/xorq:builder` | Create ExprBuilder entries (ML pipelines, BSL, custom TagHandlers) |
-| `/xorq:catalog-explore` | Discover and inspect catalog entries |
+| `/xorq:ingest` | Originate `source` entries from raw data (csv / parquet / db) by building |
+| `/xorq:composer` | Compose catalogued expressions into new `composed` entries |
+| `/xorq:builder` | Work with `ExprBuilder` entries and custom `TagHandler`s |
+| `/xorq:ml` | Fit, version, and run ML models on catalogued data (`FittedPipeline`) |
+| `/xorq:catalog-explore` | Find and inspect catalogs read-only — entries, aliases, schemas, history |
 
 ## Architecture
 
@@ -44,6 +45,6 @@ The plugin provides skills that guide Claude to use the `xorq` CLI via Bash. No 
 Claude --skills--> xorq CLI --subprocess--> xorq engine
 ```
 
-### Ambient context
+### Shared essentials
 
-`CLAUDE.md` provides Claude with background knowledge about xorq concepts (expressions, catalogs, ExprKind, TagHandlers, ML pipelines) so it can assist effectively even outside of explicit skill invocations.
+The plugin ships **no `CLAUDE.md`** — a plugin's root `CLAUDE.md` is never loaded into Claude's context. Instead, a **`SessionStart` hook** (`hooks/hooks.json`) prints `skills/_shared/essentials.md` into context once per session: one source of truth for the shared vocabulary (environment, catalog resolution, and the build→add / recover / verify idioms), present before any skill runs. It's the supported way to ship ambient plugin context — it fires on the plugin install alone, including in headless `claude -p`, so the e2e tests exercise the real mechanism. Deeper background lives in `skills/_shared/reference.md`, linked from the skills and read on demand.

@@ -1,81 +1,91 @@
 ---
-description: Explore a xorq catalog — list entries, inspect schemas, and understand available data expressions. Use when the user asks about what's in a catalog, what expressions are available, or wants to understand a pipeline's inputs and outputs.
+description: Find and inspect xorq catalogs read-only — discover which catalogs exist, list entries and aliases, show metadata and schemas, preview rows, read history. No build, no acquire, no add. Also the verification vocabulary for confirming a build produced the right entry.
 ---
 
-# Catalog Explorer
+# Catalog-Explore — Read-Only Catalog Inspection
 
-Use the xorq CLI to help the user explore their catalog.
+Discover which catalogs exist, then look inside one: list entries and aliases, show an entry's metadata
+and schema, preview rows, read history. Everything here is **read-only** — it never changes the catalog.
+This is also the **verification vocabulary** the other skills lean on (the essentials' VERIFY points here):
+after an `ingest` / `composer` / `ml` build, confirm the result with `list --kind`, `schema`, `show`,
+and a `run` preview.
 
-## When to use / When NOT to use
+**Read-only commands only:** `info` · `list` · `list-aliases` · `show` · `schema` · `log` · `check` ·
+`default` (no flags) · `run` (executes, adds nothing). **Never** `add` / `remove` / `add-alias` /
+`remove-alias` / `compose` / `init` / `clone` / `pull` / `push` / `sync` / `set-remote` — those mutate
+(to create entries use `ingest` / `composer` / `ml`). The essentials' BUILD-ADD / RECOVER are for those
+skills; here, only read.
 
-- **Use when**: listing entries, inspecting schemas, validating consistency, viewing catalog history.
-- **Not when**:
-  - Actually executing or composing entries → `/xorq:composer`.
-  - Adding new entries → `/xorq:init` (raw files) or `/xorq:builder` (ML / BSL / custom tags).
 
-## Workflow
+## 1. Find a catalog
 
-### 0. Resolve target catalog
-
-Before exploring, run the **Catalog Resolution** procedure from `xorq/CLAUDE.md` — glob for an existing `catalog.yaml` in the repo, ask the user about creating `<repo-name>-catalog` if none is found, or fall back to the system default. If the user passed a `-n <name>` or `-p <path>` argument, use that directly and skip the prompt.
-
-### 1. Discover entries
-
-List all entries with their kinds:
+Resolution (which catalog; the flags / env var) is in the essentials. To see what you're pointed at:
 
 ```bash
-xorq catalog list --kind
+xorq catalog default   # the default's NAME and source -> "default  (source: built-in)"
+xorq catalog info      # resolves it, prints the PATH (+ commit, remotes, entry/alias counts)
 ```
 
-If the user specified a catalog name or path, pass it through. **`-n` / `-p` are global flags on `xorq catalog` — they go BEFORE the subcommand:**
+Target a specific one with a group flag (`-p <path> info`, `-n <name> info`) or `XORQ_DEFAULT_CATALOG=<name> … info`.
+
+## 2. List entries and aliases
 
 ```bash
-xorq catalog -n <name> list --kind
-xorq catalog -p <path> list --kind
+xorq catalog list --kind             # entries (content hashes) + kind
+xorq catalog list-aliases            # the human-readable handles
 ```
 
-### 2. Inspect schemas
+**Entries are content hashes; aliases are the names that point at them.** `list` shows hashes,
+`list-aliases` shows handles — `show` / `schema` / `run` accept **either**.
 
-For entries of interest, get the full schema as JSON:
+## 3. Inspect one entry
 
 ```bash
-xorq catalog schema <name> --json
+xorq catalog show <alias>            # full metadata: kind, aliases, backends, content-local, composed-from / params / builders, in/out schema
+xorq catalog schema <alias> --json   # ExprMetadata as JSON (schema_in/out, params…)
+xorq catalog show <alias> --raw      # the metadata sidecar verbatim (YAML)
 ```
 
-This shows `schema_in` (input parameters) and `schema_out` (output columns) with types.
+## 4. Preview rows (read-only execution)
 
-### 3. Catalog context
-
-Understand the catalog's location, remotes, and size:
+`run` composes-and-executes an entry without persisting (`-o -`, per essentials):
 
 ```bash
-xorq catalog info
+xorq catalog run <alias> -o - -f json --limit 5   # one JSON object per row
 ```
 
-### 4. History
-
-View structured operation history:
+## 5. History & integrity
 
 ```bash
-xorq catalog log --json
+xorq catalog log [--json]   # replay plan: [init]/[add]/[remove] ops + summary
+xorq catalog check          # validate consistency -> "OK"
 ```
 
-### 5. Consistency check
+(Interactive browsing for humans, not headless agents: `xorq catalog tui`.)
 
-Validate that entries, aliases, metadata, and archives are consistent:
+## Verify (the VERIFY vocabulary)
+
+The canonical post-build checks the other skills point back to:
 
 ```bash
-xorq catalog check
+xorq catalog list --kind                          # expect the new <hash>  <kind>
+xorq catalog list-aliases                         # expect your alias present
+xorq catalog schema <alias> --json                # expect the right schema_out
+xorq catalog run <alias> -o - -f json --limit 5   # expect rows
 ```
 
-## Presenting results
+The Python mirror (`cat.get_catalog_entry(...)` + sidecar `.kind` / `.columns` / `.schema_out`) is in
+[reference.md](../_shared/reference.md).
 
-- Summarize entries in a table: name, kind (Source, UnboundExpr, Composed, ExprBuilder), and key columns.
-- When showing schemas, highlight the input parameters (`schema_in`) vs output columns (`schema_out`).
-- If an entry is `UnboundExpr` (partial), explain that it requires input data to run — it's a reusable transform.
-- If an entry is `ExprBuilder`, note that it contains a recoverable domain object (e.g., ML pipeline, semantic model).
-- If an entry is `Composed`, note that it was assembled from other catalog entries.
+## Pitfalls (explore-specific; shared ones are in the essentials)
+
+- **No auto-create.** Read commands never initialize a catalog; a missing target fails with a clear
+  "Catalog not found … run `init`" message.
+- **Hash vs alias.** Pass either to `show` / `schema` / `run`; "Entry not found" → check both lists.
+- **Content may not be local.** A cloned catalog can show `Content local: no` — sidecar metadata
+  (kind / schema / backends / aliases) still reads, but previewing rows or loading `.expr` triggers an
+  annex fetch from the remote.
 
 ## Arguments
 
-If the user provides arguments: $ARGUMENTS — treat them as a catalog name or entry name to focus on.
+`$ARGUMENTS`: the entry or alias to inspect, and/or the catalog to explore (`-p` / `-n`).
