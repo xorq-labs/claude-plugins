@@ -2413,7 +2413,7 @@ wheels = [
 
 [[package]]
 name = "xorq"
-version = "0.3.29"
+version = "0.3.30"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "atpublic" },
@@ -2448,9 +2448,9 @@ dependencies = [
     { name = "xorq-dasher" },
     { name = "xorq-datafusion" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/40/22/fec6cc10f9d1de10744746dbace0e691d93be80ef0434357bf2be77fd9cc/xorq-0.3.29.tar.gz", hash = "sha256:a311655e9e19555f36ee8ca8a506ee51ed02b06e06f493958e9fe0c927b03c18", size = 1817492, upload-time = "2026-06-09T13:53:22.783Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a7/f2/815c5209b5366f8140a705c74ad53f37a844d78f7df5ea631d41787c2e5d/xorq-0.3.30.tar.gz", hash = "sha256:1cdf2832099fb98c376fa9a0becade558fde5d4a93b412dacb3a9596b3f980a3", size = 1850187, upload-time = "2026-06-16T08:14:53.85Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d3/a0/9573be921890cedbe38f65b9a038baae4d361977848f138820807e79f4fd/xorq-0.3.29-py3-none-any.whl", hash = "sha256:82ff18a924ee4c06a81a9d9729d35cb1291a48f4a98c4f60709ee8466662b5e3", size = 1733601, upload-time = "2026-06-09T13:53:20.594Z" },
+    { url = "https://files.pythonhosted.org/packages/00/90/9c73541670cb5d989b352af62c2e2d04cce061eb9582599c5a933cabe1fe/xorq-0.3.30-py3-none-any.whl", hash = "sha256:92658317df897fca4a21a46b71c3f66b294d4cb541ec03a61e7f834436a94299", size = 1770460, upload-time = "2026-06-16T08:14:52.245Z" },
 ]
 
 [package.optional-dependencies]
