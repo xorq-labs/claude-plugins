@@ -24,6 +24,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import zipfile
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
@@ -719,3 +720,359 @@ def assert_read_only(xorq_bin: str, cat: Path, before: tuple) -> None:
     assert after == before, (
         f"catalog changed — explore must be read-only\n  before: {before}\n  after:  {after}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Integration e2e (multi-skill) — clone+compose (BTS), ingest+compose (penguins),
+# ml x2 (iris). One casual prompt drives a whole flow; assertions run on the
+# deterministic artifacts. These reuse the discovery/run helpers above and add:
+#   - catalog lookup by NAME (penguins/iris) and by CONTENT (the BTS local copy),
+#   - SQL introspection (stored `sql_queries`) for structural checks without executing, and
+#   - model scoring via the builder round-trip (AUC / MSE) for the iris models.
+# The penguins/iris CSVs are generated at runtime into the tmp project (iris from sklearn — offline;
+# penguins from the pinned xorq example — needs the examples bucket), so nothing is committed.
+#
+# NB: a catalog the model names ("call it iris") lands in xorq's GLOBAL named store
+# (``~/.local/share/xorq/catalogs/<name>`` — keyed off HOME with no env override, so it
+# can't be redirected into the per-test temp HOME without breaking claude's own auth).
+# So discovery here also searches NAMED_STORE. That's intended for CI (fresh runner per
+# run); locally these tests do populate the named store. Distinct tests use distinct names
+# (penguins / iris / bts-*), so this stays safe under ``pytest -n``.
+# ---------------------------------------------------------------------------
+
+NAMED_STORE = Path("~/.local/share/xorq/catalogs").expanduser()
+
+
+def github_reachable() -> bool:
+    """True if a TCP connection to github.com:443 opens within 3s (gates the BTS test)."""
+    try:
+        with socket.create_connection(("github.com", 443), timeout=3):
+            return True
+    except OSError:
+        return False
+
+
+def seed_penguins(proj: Path) -> Path:
+    """Write ``proj/data/penguins.csv`` from the pinned xorq example, returning its path.
+
+    Generated at runtime (not committed) — the prompt references data/penguins.csv. Pulls from the
+    examples bucket, so it skips the test if that data can't be fetched.
+    """
+    import xorq.examples as ex
+
+    try:
+        df = ex.penguins.fetch(backend=xo.connect()).execute()
+    except Exception as e:  # network / examples bucket unavailable
+        pytest.skip(f"penguins example data unavailable: {e}")
+    data = proj / "data"
+    data.mkdir(exist_ok=True)
+    path = data / "penguins.csv"
+    df.to_csv(path, index=False)
+    return path
+
+
+def seed_iris(proj: Path) -> Path:
+    """Write ``proj/data/iris.csv`` from sklearn (bundled, offline), returning its path.
+
+    Generated at runtime (not committed). Columns are normalized to snake_case and the integer
+    target is mapped to species names, so the source is the familiar
+    {sepal_length, sepal_width, petal_length, petal_width, species}.
+    """
+    from sklearn.datasets import load_iris
+
+    d = load_iris(as_frame=True)
+    df = d.frame.rename(columns={
+        "sepal length (cm)": "sepal_length", "sepal width (cm)": "sepal_width",
+        "petal length (cm)": "petal_length", "petal width (cm)": "petal_width",
+    })
+    df["species"] = df.pop("target").map(dict(enumerate(d.target_names)))
+    data = proj / "data"
+    data.mkdir(exist_ok=True)
+    path = data / "iris.csv"
+    df.to_csv(path, index=False)
+    return path
+
+
+def all_catalogs(run: ClaudeRun) -> list:
+    """Every catalog the run could have produced: repo-local in the project, under the per-test
+    XDG home, or in xorq's global named store (NAMED_STORE) where a ``-n <name>`` catalog lands."""
+    roots = list(run.catalog_search_dirs) + [NAMED_STORE]
+    return sorted({d for root in roots if root.exists() for d in _catalog_dirs(root)})
+
+
+def catalog_aliases(xorq_bin: str, cat: Path) -> list:
+    """The alias names defined in a catalog (``list-aliases``)."""
+    return [ln.strip() for ln in _xq(xorq_bin, "catalog", "-p", str(cat), "list-aliases").stdout.splitlines() if ln.strip()]
+
+
+def named_catalog(run: ClaudeRun, *needles: str) -> Path | None:
+    """The catalog whose directory name contains any ``needle`` (case-insensitive).
+
+    The user names these catalogs ("call it iris"), so the model creates a catalog whose
+    location carries that name — repo-local ``./iris`` or a named ``iris`` under XDG both match.
+    """
+    for cat in all_catalogs(run):
+        low = cat.name.lower()
+        if any(n.lower() in low for n in needles):
+            return cat
+    return None
+
+
+def catalog_with_aliases(xorq_bin: str, run: ClaudeRun, *needles: str) -> Path | None:
+    """The catalog that defines any of ``needles`` as an alias — identifies a catalog by its
+    CONTENT rather than its name (the BTS local copy, whatever the model named the clone dir,
+    is the one that carries ``flights`` / ``semantic-flights``)."""
+    want = set(needles)
+    for cat in all_catalogs(run):
+        if want & set(catalog_aliases(xorq_bin, cat)):
+            return cat
+    return None
+
+
+def bts_candidate_catalogs(run: ClaudeRun) -> list:
+    """Catalogs that could hold the BTS local copy + the entries composed onto it.
+
+    The model is told to make a *writable local copy* (the remote is read-only) and the STEER
+    points it at the working dir, so the copy is typically a repo-local catalog in the project —
+    and it need NOT carry the original `flights`/`semantic-flights` aliases (the model may compose
+    into a fresh catalog that references the cloned source). So we discover by SIGNATURE, not by
+    alias: everything in the project / XDG home, plus any global named-store catalog whose name
+    hints at BTS. Restricting the named-store side keeps the SQL/schema scan off the developer's
+    unrelated global catalogs.
+    """
+    cats = {d for root in run.catalog_search_dirs if root.exists() for d in _catalog_dirs(root)}
+    if NAMED_STORE.exists():
+        for d in _catalog_dirs(NAMED_STORE):
+            if any(k in d.name.lower() for k in ("bts", "flight", "semantic")):
+                cats.add(d)
+    return sorted(cats)
+
+
+def catalog_entries(xorq_bin: str, cat: Path) -> list:
+    """(hash, kind) for every entry in a catalog (``list --kind`` rows: ``<hash>\\t<kind>``)."""
+    out = []
+    for line in catalog_kinds(xorq_bin, cat).splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            out.append((parts[0], parts[1]))
+    return out
+
+
+def derived_in(xorq_bin: str, cat: Path) -> list:
+    """Hashes of the ``composed`` / ``expr`` (derived) entries in one catalog."""
+    return [h for h, k in catalog_entries(xorq_bin, cat) if k in ("composed", "expr")]
+
+
+def derived_rows(xorq_bin: str, cat: Path, *, limit: int = 400) -> list:
+    """Every row from running all derived entries in a catalog (union across entries).
+
+    The model may answer a two-part question ("heaviest AND tiniest") in one entry or split it
+    across two, so callers check the union rather than any single entry's rows.
+    """
+    rows = []
+    for h in derived_in(xorq_bin, cat):
+        rows += catalog_run_rows(xorq_bin, cat, h, limit=limit)
+    return rows
+
+
+def entry_sql(xorq_bin: str, cat: Path, ident: str) -> str:
+    """The entry's stored ``sql_queries`` concatenated and lowercased (``schema --json``).
+
+    Lets a test prove an expression's STRUCTURE — which columns/filters it encodes — without
+    executing it (so the BTS expressions, whose data isn't cached, are still checkable). Empty
+    string for entries that expose no SQL (e.g. a plain source).
+    """
+    raw = _xq(xorq_bin, "catalog", "-p", str(cat), "schema", str(ident), "--json").stdout
+    try:
+        d = json.loads(raw)
+    except json.JSONDecodeError:
+        return ""
+    parts = []
+    for q in d.get("sql_queries") or []:
+        parts += [str(x) for x in q] if isinstance(q, (list, tuple)) else [str(q)]
+    return "\n".join(parts).lower()
+
+
+# --- BTS deterministic value check (subset): recompute the avg-delay frame from the semantic model
+#
+# We don't compare the whole frame — just the two delay columns (avg dep / avg arr delay) keyed by
+# whatever time-block grouping the model chose, at that aggregate level. BTS flight data is historical
+# (immutable), so pinning a single month makes both sides deterministic; the parquet snapshot cache is
+# content-addressed, so the model's expr reuses the download this helper warms (a cross-clone run is a
+# 1s cache hit). Both sides run via `xorq run <build> -p …` — NOT `catalog run -p`, which returns 0/garbage
+# rows for a parameterized UDXF source in 0.3.29. Raises on any fetch failure so the caller can skip.
+
+BTS_CATALOG_URL = "https://github.com/xorq-labs/xorq-catalog-bts"
+BTS_YEAR_MONTHS = "2025_11"  # one finalized BTS month — bounds the download (~28 MB) and is fixed
+
+_BTS_TIMEBLOCK_SCRIPT = '''from xorq.catalog.catalog import Catalog
+cat = Catalog.from_repo_path({cat!r})
+model = cat.load("semantic-flights").ls.builder
+expr = model.query(
+    dimensions={dims!r},
+    measures=["avg_dep_delay", "avg_arr_delay"],
+    order_by=[({first!r}, "asc")],
+).to_untagged()
+'''
+
+
+def _git_env() -> dict:
+    """Subprocess env with a git identity forced (so `catalog clone` commits succeed in CI)."""
+    env = {k: v for k, v in os.environ.items() if k != "XORQ_DEFAULT_CATALOG"}
+    for k, v in (
+        ("GIT_AUTHOR_NAME", "xorq test"), ("GIT_AUTHOR_EMAIL", "test@xorq.dev"),
+        ("GIT_COMMITTER_NAME", "xorq test"), ("GIT_COMMITTER_EMAIL", "test@xorq.dev"),
+    ):
+        env.setdefault(k, v)
+    return env
+
+
+def _xq_step(xorq_bin: str, *args: object, cwd: Path, env: dict, timeout: int = 180):
+    r = subprocess.run([xorq_bin, *map(str, args)], cwd=str(cwd), env=env,
+                       capture_output=True, text=True, timeout=timeout)
+    if r.returncode != 0:
+        raise RuntimeError(f"`xorq {args[0]} …` failed:\n{(r.stderr or r.stdout)[-500:]}")
+    return r
+
+
+def _xorq_run_build_rows(xorq_bin: str, build_dir: str, cache_dir: Path, *, timeout: int = 360) -> list:
+    """`xorq run <build_dir> -p year_months=<pinned> --cache-dir <cache>` → JSON rows (raises on failure)."""
+    r = subprocess.run(
+        [xorq_bin, "run", str(build_dir), "-p", f"year_months={BTS_YEAR_MONTHS}",
+         "--cache-dir", str(cache_dir), "-o", "-", "-f", "json"],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(f"`xorq run` failed:\n{(r.stderr or r.stdout)[-500:]}")
+    rows = [json.loads(ln) for ln in r.stdout.splitlines() if ln.strip().startswith("{")]
+    if not rows:
+        raise RuntimeError(f"`xorq run` produced no rows:\n{(r.stderr or r.stdout)[-500:]}")
+    return rows
+
+
+def bts_run_entry_rows(xorq_bin: str, cat: Path, ident: str, cache_dir: Path) -> list:
+    """Run the MODEL's catalogued entry pinned to BTS_YEAR_MONTHS — by extracting its build archive
+    and `xorq run`-ing it (``catalog run -p`` can't re-parameterize the UDXF source in 0.3.29)."""
+    cat = Path(cat)
+    archive = cat / "aliases" / f"{ident}.zip"
+    if not archive.exists():
+        archive = cat / "entries" / f"{ident}.zip"
+    if not archive.exists():
+        raise RuntimeError(f"entry {ident} not found in {cat}")
+    tmp = Path(tempfile.mkdtemp(prefix="xorq-bts-entry-"))
+    try:
+        with zipfile.ZipFile(archive.resolve()) as zf:
+            zf.extractall(tmp)
+        builds = [p.parent for p in tmp.rglob("expr.yaml")]
+        if not builds:
+            raise RuntimeError(f"no build dir in entry {ident}")
+        return _xorq_run_build_rows(xorq_bin, str(builds[0]), cache_dir)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def bts_expected_timeblock_rows(
+    xorq_bin: str, workdir: Path, cache_dir: Path, dimensions: tuple = ("dep_time_blk",)
+) -> list:
+    """Recompute the canonical avg-delay answer by querying the semantic model with ``dimensions``.
+
+    ``dimensions`` is the time-block grouping the MODEL chose (read off its entry's schema), so the
+    expected frame is at the same aggregate level — 1-D (``["dep_time_blk"]``) or 2-D
+    (``["dep_time_blk", "arr_time_blk"]``). Clones the BTS catalog, builds the query, and runs the
+    BUILD directly (`xorq run`) pinned to BTS_YEAR_MONTHS — warming ``cache_dir`` for the model's expr.
+
+    Never `catalog add` here: on a URL-cloned catalog that AUTO-PUSHES to origin. Cloning + `xorq run`
+    keeps everything local (we also drop the origin remote), so the public catalog is never written.
+    """
+    dims = list(dimensions) or ["dep_time_blk"]
+    workdir = Path(workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+    env = _git_env()
+    cat = workdir / "cat"
+    _xq_step(xorq_bin, "catalog", "clone", BTS_CATALOG_URL, "--path", str(cat),
+             cwd=workdir, env=env, timeout=180)
+    subprocess.run(["git", "-C", str(cat), "remote", "remove", "origin"],
+                   capture_output=True, text=True)  # ensure nothing can sync back to the remote
+    script = workdir / "expected_timeblock.py"
+    script.write_text(_BTS_TIMEBLOCK_SCRIPT.format(cat=str(cat.resolve()), dims=dims, first=dims[0]))
+    bp = workdir / "bp.txt"
+    _xq_step(xorq_bin, "build", str(script), "--builds-dir", str(workdir / "builds"),
+             "--emit-build-path-to", str(bp), cwd=workdir, env=env, timeout=180)
+    return _xorq_run_build_rows(xorq_bin, bp.read_text().strip(), cache_dir)
+
+
+def run_entry_rows(xorq_bin: str, cat: Path, ident: str, *, limit: int = 200) -> list:
+    """Run a catalog entry and return its JSON rows, robust to BOTH source forms.
+
+    Tries ``catalog run`` first (resolves a deferred / re-readable source), then falls back to
+    extracting the build archive and ``xorq run``-ing the build dir — which is what works for a
+    MATERIALIZED read_parquet source, whose bundled relative ``database_tables/*.parquet`` only
+    resolves inside the extracted build (``catalog run`` returns 0 rows for those in 0.3.29). The two
+    paths are complementary, so trying both makes the run independent of how the model ingested.
+    Accepts an alias (resolved via ``aliases/<name>.zip``) or a content hash; ``[]`` if neither works.
+    """
+    rows = catalog_run_rows(xorq_bin, cat, ident, limit=limit)
+    if rows:
+        return rows
+    cat = Path(cat)
+    archive = cat / "aliases" / f"{ident}.zip"
+    if not archive.exists():
+        archive = cat / "entries" / f"{ident}.zip"
+    if not archive.exists():
+        return []
+    tmp = Path(tempfile.mkdtemp(prefix="xorq-entry-"))
+    try:
+        with zipfile.ZipFile(archive.resolve()) as zf:
+            zf.extractall(tmp)
+        builds = [p.parent for p in tmp.rglob("expr.yaml")]
+        if not builds:
+            return []
+        r = subprocess.run(
+            [xorq_bin, "run", str(builds[0]), "-o", "-", "-f", "json", "--limit", str(limit)],
+            capture_output=True, text=True, timeout=300,
+        )
+        return [json.loads(ln) for ln in r.stdout.splitlines() if ln.strip().startswith("{")]
+    except (zipfile.BadZipFile, subprocess.TimeoutExpired):
+        return []
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def entry_show(xorq_bin: str, cat: Path, ident: str) -> str:
+    """An entry's ``catalog show`` text, lowercased — used to assert a builder's kind.
+
+    For a fitted-pipeline expr_builder this reports ``Type: Expression Builder`` plus a
+    ``Type: fitted_pipeline`` block (steps + target), so a test can confirm the model is a
+    FittedPipeline (not just any builder) — the same string the ml skill's Verify step checks.
+    """
+    return _xq(xorq_bin, "catalog", "-p", str(cat), "show", str(ident)).stdout.lower()
+
+
+def builder_metric(
+    xorq_bin: str, cat: Path, ident: str, data_csv: Path, scorer: str
+) -> float | None:
+    """Recover a FittedPipeline from a catalogued entry and score it on ``data_csv``.
+
+    Runs the skill's documented round-trip (``run -c 'source.ls.builder.score_expr(...)'``) with
+    an sklearn ``scorer`` name and returns the scalar metric. Returns ``None`` when the scorer
+    doesn't apply to that model (a regression scorer on a classifier errors to no rows, and vice
+    versa) — which is exactly how a caller tells the classifier and the regressor apart.
+    """
+    code = (
+        f"source.ls.builder.score_expr("
+        f"xo.deferred_read_csv({str(Path(data_csv).resolve())!r}), scorer={scorer!r})"
+    )
+    r = _xq(xorq_bin, "catalog", "-p", str(cat), "run", str(ident),
+            "--use-this-venv", "-c", code, "-o", "-", "-f", "json")
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        nums = [v for v in row.values() if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if nums:
+            return float(nums[0])
+    return None
