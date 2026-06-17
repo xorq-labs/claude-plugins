@@ -721,7 +721,11 @@ def assert_entry_runs(
     assert ents, f"no entry of kinds {tuple(kinds)} created\nclaude said: {run.said}"
     last = None
     for cat, h in ents:
-        rows = catalog_run_rows(xorq_bin, cat, h, limit=limit)
+        # run_entry_rows (not bare catalog_run_rows): a builder over a cross-backend join
+        # serializes a plan that bare ``catalog run`` can't replay (returns 0 rows on 0.3.30),
+        # but extracting the build and ``xorq run``-ing it executes the plan in-process. The
+        # fallback makes the run independent of the entry's source/join shape.
+        rows = run_entry_rows(xorq_bin, cat, h, limit=limit)
         if not rows:
             last = "entry produced no rows"
             continue
