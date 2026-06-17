@@ -1012,3 +1012,22 @@ def builder_metric(
         if nums:
             return float(nums[0])
     return None
+
+
+def catalog_run_code_rows(
+    xorq_bin: str, cat: Path, ident: str, code: str, *, limit: int = 200
+) -> list:
+    """Recover a catalogued entry's builder via ``run -c '<code>'`` and return its JSON rows.
+
+    ``code`` is the skill's sandboxed expression over ``source`` (the entry's expr) /
+    ``source.ls.builder`` (the recovered builder) — e.g.
+    ``source.ls.builder.predict(xo.deferred_read_parquet('/abs/new.parquet'))``. Returns ``[]``
+    when the code errors (so callers can probe alternatives). This is the deterministic way to
+    exercise a fitted-pipeline entry: the pipeline carries its own feature columns, so predicting
+    on the raw held-out file needs no knowledge of the model's exact features.
+    """
+    r = _xq(
+        xorq_bin, "catalog", "-p", str(cat), "run", str(ident),
+        "--use-this-venv", "-c", code, "-o", "-", "-f", "json", "--limit", str(limit),
+    )
+    return [json.loads(ln) for ln in r.stdout.splitlines() if ln.strip().startswith("{")]
