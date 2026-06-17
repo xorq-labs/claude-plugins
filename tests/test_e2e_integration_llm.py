@@ -49,7 +49,6 @@ from conftest import (
     builder_metric,
     catalog_aliases,
     catalog_entries,
-    derived_in,
     entry_schema,
     entry_show,
     entry_sql,
@@ -96,7 +95,10 @@ def test_llm_integration_semantic_bts(
     ohio = cali = dow = False
     timeblock_entry = None  # (cat, hash) of the avg-delay-by-time-block entry
     for cat in cats:
-        for h in derived_in(xorq_bin, cat):
+        # a semantic-model query can land as `expr_builder` (tagged) or `expr`/`composed`; scan all.
+        for h, kind in catalog_entries(xorq_bin, cat):
+            if kind not in ("composed", "expr", "expr_builder"):
+                continue
             sql = entry_sql(xorq_bin, cat, h)
             # flights question: Ohio inbound / California outbound, by day of week. Accept state
             # codes ('OH'/'CA') or full names; the two halves may live in one entry or two.
@@ -107,8 +109,11 @@ def test_llm_integration_semantic_bts(
             # arrival-delay measure (ignore pct-of-block / minutes / 15-min-flag variants).
             cols = {c.lower() for c in entry_schema(xorq_bin, cat, h)}
             has_block = any("time_blk" in c or "timeblk" in c or "time_block" in c for c in cols)
-            delay = lambda side: any(  # noqa: E731 — a mean dep/arr delay column, not a variant
-                side in c and "delay" in c and not any(x in c for x in ("pct", "block", "minute", "group", "del15"))
+            # the AGGREGATED mean measure (avg_dep_delay / avg_arr_delay), not the raw DepDelay
+            # column on the un-aggregated `semantic-flights` model (also an expr_builder).
+            delay = lambda side: any(  # noqa: E731
+                "avg" in c and side in c and "delay" in c
+                and not any(x in c for x in ("pct", "block", "minute", "group", "del15"))
                 for c in cols
             )
             if has_block and delay("dep") and delay("arr"):
@@ -330,7 +335,7 @@ def _assert_timeblock_subset(actual_rows: list, expected_rows: list, block_dims:
     isn't brittle. Nulls (sparse grid cells) compare equal; floats within a small tolerance.
     """
     def delay_col(r0: dict, side_kw: str) -> str | None:
-        return next((c for c in r0 if side_kw in c.lower() and "delay" in c.lower()
+        return next((c for c in r0 if "avg" in c.lower() and side_kw in c.lower() and "delay" in c.lower()
                      and not any(x in c.lower() for x in ("pct", "block", "minute", "group", "del15"))), None)
 
     def index(rows: list, side: str) -> tuple:
