@@ -38,8 +38,8 @@ from conftest import (
     assert_entry_runs,
     assert_grouped,
     builder_entries,
-    catalog_run_rows,
     entries_by_kind,
+    run_entry_rows,
     seed_builder_module,
     seed_catalog_sources,
 )
@@ -106,17 +106,20 @@ def test_llm_builder_ml_predict(xorq_bin: str, claude_project: Path, run_claude:
     n_prod = len(pd.read_parquet((DATA / "events_prod.parquet").resolve()))
     canon = lambda rows: sorted(json.dumps(r, sort_keys=True) for r in rows)  # order-insensitive
 
-    # run the agent's stored entries directly (their graph already includes feature engineering)
+    # run the agent's stored entries directly (their graph already includes feature engineering).
+    # run_entry_rows (not bare catalog_run_rows): a predict builder over a materialized source
+    # can't be replayed by bare ``catalog run`` (0 rows on 0.3.30) — the build must be extracted
+    # and ``xorq run``-ed so the bundled source resolves.
     pred_entries = []
     for cat, h in entries_by_kind(xorq_bin, run, ("expr_builder", "expr", "composed", "source")):
-        rows = catalog_run_rows(xorq_bin, cat, h, limit=n_prod + 50)
+        rows = run_entry_rows(xorq_bin, cat, h, limit=n_prod + 50)
         if rows and _prediction_columns(rows[0]):
             pred_entries.append((cat, h, rows))
     assert pred_entries, f"no catalogued entry runs to predictions\nclaude said: {run.said}"
 
     # round-trip determinism: re-running a prediction entry reproduces it exactly
     cat, h, rows = pred_entries[0]
-    assert canon(rows) == canon(catalog_run_rows(xorq_bin, cat, h, limit=n_prod + 50)), (
+    assert canon(rows) == canon(run_entry_rows(xorq_bin, cat, h, limit=n_prod + 50)), (
         f"prediction entry not deterministic across runs\nclaude said: {run.said}"
     )
 

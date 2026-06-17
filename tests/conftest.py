@@ -610,7 +610,8 @@ def assert_sources(
     )
     if run_one:
         cat, h = entries[0]
-        assert catalog_run_rows(xorq_bin, cat, h), \
+        # run_entry_rows: bare run for a deferred source, extract+xorq-run for a materialized one.
+        assert run_entry_rows(xorq_bin, cat, h, limit=3), \
             f"source {h} produced no rows\nclaude said: {run.said}"
 
 
@@ -675,7 +676,10 @@ def assert_derived(xorq_bin: str, run: ClaudeRun, check: Callable, *, limit: int
     assert ent, f"no composed/expr entry created\nclaude said: {run.said}"
     last = None
     for cat, h in ent:
-        rows = catalog_run_rows(xorq_bin, cat, h, limit=limit)
+        # run_entry_rows tries bare ``catalog run`` first, then extract + ``xorq run`` — the
+        # latter is what replays a derived entry whose plan bundles a materialized source or a
+        # cross-backend transfer (bare run yields 0 rows for those on 0.3.30).
+        rows = run_entry_rows(xorq_bin, cat, h, limit=limit)
         if not rows:
             last = "entry produced no rows"
             continue
@@ -911,7 +915,7 @@ def derived_rows(xorq_bin: str, cat: Path, *, limit: int = 400) -> list:
     """
     rows = []
     for h in derived_in(xorq_bin, cat):
-        rows += catalog_run_rows(xorq_bin, cat, h, limit=limit)
+        rows += run_entry_rows(xorq_bin, cat, h, limit=limit)  # bare run, then extract+xorq-run fallback
     return rows
 
 
