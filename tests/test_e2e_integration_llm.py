@@ -34,7 +34,6 @@ Opt-in only: ``pytest -m llm``. Skips cleanly without claude / auth / fixture da
 
 from __future__ import annotations
 
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -44,8 +43,6 @@ import pytest
 from conftest import (
     all_catalogs,
     bts_candidate_catalogs,
-    bts_expected_timeblock_rows,
-    bts_run_entry_rows,
     builder_metric,
     catalog_aliases,
     catalog_entries,
@@ -79,13 +76,13 @@ def test_llm_integration_semantic_bts(
     the model produced (it may compose into a fresh repo-local catalog referencing the cloned source,
     so the original `flights` / `semantic-flights` aliases need not be present).
 
-    Time-block entry — checked DETERMINISTICALLY but as a SUBSET: we recompute the canonical answer
-    from the same semantic model (avg departure/arrival delay) at WHATEVER block grouping the model
-    chose — read off its schema, 1-D or 2-D — pinned to one immutable BTS month, then assert the
-    model's two delay columns equal ours per block. Only those two columns are compared, so extra
-    columns the model adds (n_flights, pct-of-block, …) don't make it brittle. Both sides run via
-    `xorq run <build> -p` (not `catalog run -p`, which can't re-parameterize the UDXF in 0.3.29);
-    skipped on any BTS fetch failure.
+    Time-block entry — checked as a SUBSET SCHEMA (a time-of-day block dimension plus an average
+    departure-delay AND an average arrival-delay measure), not by value. We deliberately do NOT
+    compare executed values here: BTS flight data is fetched on demand from transtats.bts.gov and a
+    given month's fetch isn't reproducible run-to-run (partial/throttled responses), so even the
+    SAME expression yields different aggregates across runs — a value assert would be irreducibly
+    flaky. The aggregate level + measures are what's deterministic, so that's what we pin. (Penguins
+    and iris below run on local CSV, so those DO assert values.)
     """
     run = run_claude(Integration.SEMANTIC_BTS, timeout=600)
 
@@ -124,23 +121,9 @@ def test_llm_integration_semantic_bts(
         f"claude said: {run.said}"
     )
     assert timeblock_entry is not None, (
-        "no entry carries a time-of-day block dimension plus average departure- and arrival-delay "
-        f"measures\nclaude said: {run.said}"
+        "no entry carries the expected time-block schema — a time-of-day block dimension plus an "
+        f"average departure-delay AND an average arrival-delay measure\nclaude said: {run.said}"
     )
-
-    # deterministic SUBSET value check: the model's two delay columns must equal the canonical answer
-    # we recompute from the semantic model at the SAME block grouping it used (1-D or 2-D).
-    tb_cat, tb_hash = timeblock_entry
-    block_dims = [c for c in entry_schema(xorq_bin, tb_cat, tb_hash)
-                  if any(x in c.lower() for x in ("time_blk", "timeblk", "time_block"))]
-    work = claude_project.parent / "_bts_expected"
-    cache = claude_project.parent / "_bts_cache"
-    try:
-        expected = bts_expected_timeblock_rows(xorq_bin, work, cache, dimensions=tuple(block_dims))
-        actual = bts_run_entry_rows(xorq_bin, tb_cat, tb_hash, cache)
-    except (RuntimeError, subprocess.TimeoutExpired) as e:
-        pytest.skip(f"BTS data unavailable for the deterministic check: {e}")
-    _assert_timeblock_subset(actual, expected, block_dims, run=run)
 
 
 # --- 2) penguins: ingest a local CSV into a `penguins` catalog, compose heaviest/tiniest ------
@@ -326,44 +309,5 @@ def _is_penguin(row: dict, mass: float, species: str) -> bool:
 def _is_in_rows(rows: list, mass: float, species: str) -> bool:
     """True if any row matches the given penguin (mass + species)."""
     return any(_is_penguin(r, mass, species) for r in rows)
-
-
-def _assert_timeblock_subset(actual_rows: list, expected_rows: list, block_dims: list, *, run) -> None:
-    """Deterministic SUBSET check: the model's avg dep/arr delay (keyed by its block grouping) must
-    equal the values we recompute from the semantic model. Only those two columns are compared, keyed
-    by ``block_dims`` — extra columns the model added (n_flights, pct-of-block, …) are ignored, so it
-    isn't brittle. Nulls (sparse grid cells) compare equal; floats within a small tolerance.
-    """
-    def delay_col(r0: dict, side_kw: str) -> str | None:
-        return next((c for c in r0 if "avg" in c.lower() and side_kw in c.lower() and "delay" in c.lower()
-                     and not any(x in c.lower() for x in ("pct", "block", "minute", "group", "del15"))), None)
-
-    def index(rows: list, side: str) -> tuple:
-        r0 = rows[0]
-        keys = [d for d in block_dims if d in r0]
-        dep, arr = delay_col(r0, "dep"), delay_col(r0, "arr")
-        assert keys and dep and arr, (
-            f"{side} missing block key(s) {block_dims} / dep-delay / arr-delay; cols={list(r0)}\n"
-            f"claude said: {run.said}"
-        )
-        return {tuple(str(r[k]) for k in keys): (r[dep], r[arr]) for r in rows}, keys
-
-    actual, _ = index(actual_rows, "model expr")
-    expected, keys = index(expected_rows, "canonical")
-
-    def close(x: object, y: object) -> bool:
-        if x is None or y is None:
-            return x is None and y is None          # both null (sparse cell)
-        return abs(float(x) - float(y)) <= 0.01
-
-    missing = [k for k in expected if k not in actual]
-    mismatch = [(k, expected[k], actual[k]) for k in expected
-                if k in actual and not (close(expected[k][0], actual[k][0])
-                                        and close(expected[k][1], actual[k][1]))]
-    assert not missing and not mismatch, (
-        f"time-block avg delays don't match the canonical answer from the semantic model "
-        f"(keys {keys})\n  missing keys: {missing[:5]}\n  mismatched: {mismatch[:5]}\n"
-        f"claude said: {run.said}"
-    )
 
 

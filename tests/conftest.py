@@ -163,10 +163,18 @@ PLUGIN_DIR = REPO / "xorq"
 # resolution tells the model to *ask* how to resolve the catalog when none exists.
 # This removes that one blocker — it does NOT tell the model how to ingest. The plugin
 # ships no CLAUDE.md; its SessionStart hook injects the shared essentials (skills/_shared/essentials.md).
+#
+# We also PIN the catalog *location* to repo-local. The model otherwise non-deterministically
+# creates either a repo-local catalog (in cwd) or a global NAMED catalog — and a named catalog
+# lands in xorq's HOME-keyed store (`~/.local/share/xorq/catalogs`), outside the per-test project
+# dir the assertions search, which made tests flaky. Forcing repo-local keeps every catalog in the
+# test's own tmp project: deterministic, isolated, and safe under `pytest -n`.
 STEER = (
     "Non-interactive session: when a skill would ask the user a question, pick the "
-    "recommended default and proceed without asking. For catalog resolution, create a "
-    "new repo-local catalog in the current working directory."
+    "recommended default and proceed without asking. For catalog resolution, ALWAYS create any "
+    "new catalog as a repo-local catalog inside the current working directory with "
+    "`xorq catalog -p ./<name> …` — do NOT create or use a global named catalog (never pass "
+    "`-n <name>` or set XORQ_DEFAULT_CATALOG)."
 )
 
 POSTGRES_ENV = {
@@ -891,114 +899,6 @@ def entry_sql(xorq_bin: str, cat: Path, ident: str) -> str:
     for q in d.get("sql_queries") or []:
         parts += [str(x) for x in q] if isinstance(q, (list, tuple)) else [str(q)]
     return "\n".join(parts).lower()
-
-
-# --- BTS deterministic value check (subset): recompute the avg-delay frame from the semantic model
-#
-# We don't compare the whole frame — just the two delay columns (avg dep / avg arr delay) keyed by
-# whatever time-block grouping the model chose, at that aggregate level. BTS flight data is historical
-# (immutable), so pinning a single month makes both sides deterministic; the parquet snapshot cache is
-# content-addressed, so the model's expr reuses the download this helper warms (a cross-clone run is a
-# 1s cache hit). Both sides run via `xorq run <build> -p …` — NOT `catalog run -p`, which returns 0/garbage
-# rows for a parameterized UDXF source in 0.3.29. Raises on any fetch failure so the caller can skip.
-
-BTS_CATALOG_URL = "https://github.com/xorq-labs/xorq-catalog-bts"
-BTS_YEAR_MONTHS = "2025_11"  # one finalized BTS month — bounds the download (~28 MB) and is fixed
-
-_BTS_TIMEBLOCK_SCRIPT = '''from xorq.catalog.catalog import Catalog
-cat = Catalog.from_repo_path({cat!r})
-model = cat.load("semantic-flights").ls.builder
-expr = model.query(
-    dimensions={dims!r},
-    measures=["avg_dep_delay", "avg_arr_delay"],
-    order_by=[({first!r}, "asc")],
-).to_untagged()
-'''
-
-
-def _git_env() -> dict:
-    """Subprocess env with a git identity forced (so `catalog clone` commits succeed in CI)."""
-    env = {k: v for k, v in os.environ.items() if k != "XORQ_DEFAULT_CATALOG"}
-    for k, v in (
-        ("GIT_AUTHOR_NAME", "xorq test"), ("GIT_AUTHOR_EMAIL", "test@xorq.dev"),
-        ("GIT_COMMITTER_NAME", "xorq test"), ("GIT_COMMITTER_EMAIL", "test@xorq.dev"),
-    ):
-        env.setdefault(k, v)
-    return env
-
-
-def _xq_step(xorq_bin: str, *args: object, cwd: Path, env: dict, timeout: int = 180):
-    r = subprocess.run([xorq_bin, *map(str, args)], cwd=str(cwd), env=env,
-                       capture_output=True, text=True, timeout=timeout)
-    if r.returncode != 0:
-        raise RuntimeError(f"`xorq {args[0]} …` failed:\n{(r.stderr or r.stdout)[-500:]}")
-    return r
-
-
-def _xorq_run_build_rows(xorq_bin: str, build_dir: str, cache_dir: Path, *, timeout: int = 360) -> list:
-    """`xorq run <build_dir> -p year_months=<pinned> --cache-dir <cache>` → JSON rows (raises on failure)."""
-    r = subprocess.run(
-        [xorq_bin, "run", str(build_dir), "-p", f"year_months={BTS_YEAR_MONTHS}",
-         "--cache-dir", str(cache_dir), "-o", "-", "-f", "json"],
-        capture_output=True, text=True, timeout=timeout,
-    )
-    if r.returncode != 0:
-        raise RuntimeError(f"`xorq run` failed:\n{(r.stderr or r.stdout)[-500:]}")
-    rows = [json.loads(ln) for ln in r.stdout.splitlines() if ln.strip().startswith("{")]
-    if not rows:
-        raise RuntimeError(f"`xorq run` produced no rows:\n{(r.stderr or r.stdout)[-500:]}")
-    return rows
-
-
-def bts_run_entry_rows(xorq_bin: str, cat: Path, ident: str, cache_dir: Path) -> list:
-    """Run the MODEL's catalogued entry pinned to BTS_YEAR_MONTHS — by extracting its build archive
-    and `xorq run`-ing it (``catalog run -p`` can't re-parameterize the UDXF source in 0.3.29)."""
-    cat = Path(cat)
-    archive = cat / "aliases" / f"{ident}.zip"
-    if not archive.exists():
-        archive = cat / "entries" / f"{ident}.zip"
-    if not archive.exists():
-        raise RuntimeError(f"entry {ident} not found in {cat}")
-    tmp = Path(tempfile.mkdtemp(prefix="xorq-bts-entry-"))
-    try:
-        with zipfile.ZipFile(archive.resolve()) as zf:
-            zf.extractall(tmp)
-        builds = [p.parent for p in tmp.rglob("expr.yaml")]
-        if not builds:
-            raise RuntimeError(f"no build dir in entry {ident}")
-        return _xorq_run_build_rows(xorq_bin, str(builds[0]), cache_dir)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-def bts_expected_timeblock_rows(
-    xorq_bin: str, workdir: Path, cache_dir: Path, dimensions: tuple = ("dep_time_blk",)
-) -> list:
-    """Recompute the canonical avg-delay answer by querying the semantic model with ``dimensions``.
-
-    ``dimensions`` is the time-block grouping the MODEL chose (read off its entry's schema), so the
-    expected frame is at the same aggregate level — 1-D (``["dep_time_blk"]``) or 2-D
-    (``["dep_time_blk", "arr_time_blk"]``). Clones the BTS catalog, builds the query, and runs the
-    BUILD directly (`xorq run`) pinned to BTS_YEAR_MONTHS — warming ``cache_dir`` for the model's expr.
-
-    Never `catalog add` here: on a URL-cloned catalog that AUTO-PUSHES to origin. Cloning + `xorq run`
-    keeps everything local (we also drop the origin remote), so the public catalog is never written.
-    """
-    dims = list(dimensions) or ["dep_time_blk"]
-    workdir = Path(workdir)
-    workdir.mkdir(parents=True, exist_ok=True)
-    env = _git_env()
-    cat = workdir / "cat"
-    _xq_step(xorq_bin, "catalog", "clone", BTS_CATALOG_URL, "--path", str(cat),
-             cwd=workdir, env=env, timeout=180)
-    subprocess.run(["git", "-C", str(cat), "remote", "remove", "origin"],
-                   capture_output=True, text=True)  # ensure nothing can sync back to the remote
-    script = workdir / "expected_timeblock.py"
-    script.write_text(_BTS_TIMEBLOCK_SCRIPT.format(cat=str(cat.resolve()), dims=dims, first=dims[0]))
-    bp = workdir / "bp.txt"
-    _xq_step(xorq_bin, "build", str(script), "--builds-dir", str(workdir / "builds"),
-             "--emit-build-path-to", str(bp), cwd=workdir, env=env, timeout=180)
-    return _xorq_run_build_rows(xorq_bin, bp.read_text().strip(), cache_dir)
 
 
 def run_entry_rows(xorq_bin: str, cat: Path, ident: str, *, limit: int = 200) -> list:
