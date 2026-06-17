@@ -164,17 +164,13 @@ PLUGIN_DIR = REPO / "xorq"
 # This removes that one blocker — it does NOT tell the model how to ingest. The plugin
 # ships no CLAUDE.md; its SessionStart hook injects the shared essentials (skills/_shared/essentials.md).
 #
-# We also PIN the catalog *location* to repo-local. The model otherwise non-deterministically
-# creates either a repo-local catalog (in cwd) or a global NAMED catalog — and a named catalog
-# lands in xorq's HOME-keyed store (`~/.local/share/xorq/catalogs`), outside the per-test project
-# dir the assertions search, which made tests flaky. Forcing repo-local keeps every catalog in the
-# test's own tmp project: deterministic, isolated, and safe under `pytest -n`.
+# We do NOT steer the catalog *location*: the model should resolve it the way the skill says
+# (non-interactively that means a NAMED catalog), so the suite tests the realistic flow. Isolation
+# is handled by the run_claude fixture (per-test HOME when auth is token-based; reap-on-teardown
+# otherwise), not by forcing repo-local.
 STEER = (
     "Non-interactive session: when a skill would ask the user a question, pick the "
-    "recommended default and proceed without asking. For catalog resolution, ALWAYS create any "
-    "new catalog as a repo-local catalog inside the current working directory with "
-    "`xorq catalog -p ./<name> …` — do NOT create or use a global named catalog (never pass "
-    "`-n <name>` or set XORQ_DEFAULT_CATALOG)."
+    "recommended default and proceed without asking."
 )
 
 POSTGRES_ENV = {
@@ -228,17 +224,30 @@ def _stream_result(path: Path) -> dict | None:
 
 @attrs.define
 class ClaudeRun:
-    """Outcome of one headless claude session: the parsed result + where any catalog
-    it created might live (repo-local in the project, or a named catalog under the
-    isolated XDG data home)."""
+    """Outcome of one headless claude session: the parsed result + where any catalog it created
+    might live — repo-local in the project, or a NAMED catalog in xorq's HOME-keyed store
+    (``$HOME/.local/share/xorq/catalogs``). The model is free to choose (the skill's non-interactive
+    default is a named catalog), so we discover both. ``home`` is the HOME the agent ran under: a
+    per-test temp dir when isolated (named store starts empty → every catalog is this run's), else
+    the real HOME (``named_before`` records what pre-existed so we only count this run's catalogs)."""
 
     result: dict
     project: Path
-    xdg_data: Path
+    home: Path
+    named_before: frozenset = frozenset()
+    isolated_home: bool = False
 
     @property
-    def catalog_search_dirs(self) -> list:
-        return [self.project, self.xdg_data / "xorq" / "catalogs"]
+    def all_catalog_dirs(self) -> list:
+        """Every catalog this run could have produced: repo-local catalogs in the project plus
+        named catalogs in this run's HOME store (scoped to those created during the run)."""
+        dirs = set(_catalog_dirs(self.project)) if self.project.exists() else set()
+        store = self.home / ".local" / "share" / "xorq" / "catalogs"
+        if store.exists():
+            for d in store.iterdir():
+                if (d / "catalog.yaml").exists() and (self.isolated_home or d.name not in self.named_before):
+                    dirs.add(d)
+        return sorted(dirs)
 
     @property
     def is_error(self) -> bool:
@@ -401,30 +410,54 @@ def run_claude(
 ) -> Iterator[Callable[..., ClaudeRun]]:
     """Returns ``run(prompt, *, env_extra=None, timeout=300) -> ClaudeRun``.
 
-    Each call runs ``claude -p`` headless with the xorq plugin loaded, in the temp project
-    (cwd); the plugin's SessionStart hook injects the shared essentials (no ambient CLAUDE.md). Per-test isolation (so the suite is safe under
-    ``pytest -n``): the catalog store + profiles via a redirected XDG home, and the parquet
-    cache via a unique ``XORQ_CACHE_DIR`` under /tmp. HOME is left real so claude's own auth
-    keeps working. The /tmp cache dir is removed on teardown.
+    Each call runs ``claude -p`` headless with the xorq plugin loaded, in the temp project (cwd);
+    the plugin's SessionStart hook injects the shared essentials (no ambient CLAUDE.md).
+
+    Per-test catalog isolation lets the model do the REALISTIC thing — create a NAMED catalog (the
+    skill's non-interactive default), which xorq keeps in ``$HOME/.local/share/xorq/catalogs``. To
+    isolate that shared HOME-keyed store we redirect HOME to a per-test temp dir — but only when
+    claude auth is token-based (``CLAUDE_CODE_OAUTH_TOKEN`` / ``ANTHROPIC_API_KEY``, both
+    HOME-independent), as in CI. With a redirected HOME each test gets its own empty named store, so
+    named-catalog creation can't collide under ``pytest -n``. When auth is a local OAuth login (in
+    ``~/.claude``), redirecting HOME would break it, so we keep the real HOME and instead reap the
+    catalogs this test created on teardown. Cache is a unique ``XORQ_CACHE_DIR`` either way.
     """
     append = STEER  # plugin ships no CLAUDE.md; skills inject the shared essentials themselves
     # Optionally pin the model (e.g. XORQ_CLAUDE_PLUGIN_TEST_MODEL=sonnet to run the
     # Opus-slow llm suite faster/cheaper). Unset -> claude's session default.
     model = os.environ.get("XORQ_CLAUDE_PLUGIN_TEST_MODEL")
-    xdg_data = tmp_path / "xdg-data"
-    xdg_config = tmp_path / "xdg-config"
-    xdg_data.mkdir()
-    xdg_config.mkdir()
     cache_dir = tempfile.mkdtemp(prefix="xorq-test-cache-", dir="/tmp")
+
+    # Token auth is HOME-independent → safe to redirect HOME (full per-test named-store isolation).
+    # OAuth login lives in ~/.claude → keep the real HOME and reap this test's catalogs on teardown.
+    token_auth = bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"))
+    real_cache = Path.home() / ".cache"  # keep uv's warm cache reachable across a HOME redirect
+    if token_auth:
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".gitconfig").write_text("[user]\n\tname = xorq e2e\n\temail = e2e@xorq.dev\n")
+        named_before: frozenset = frozenset()
+    else:
+        home = Path.home()
+        store = home / ".local" / "share" / "xorq" / "catalogs"
+        named_before = frozenset(p.name for p in store.iterdir() if p.is_dir()) if store.exists() else frozenset()
+    xdg_config = tmp_path / "xdg-config"
+    xdg_config.mkdir()
 
     runs = {"n": 0}
 
     def _run(prompt, *, env_extra=None, timeout=420) -> ClaudeRun:
         env = os.environ.copy()
         env.pop("XORQ_DEFAULT_CATALOG", None)
-        env["XDG_DATA_HOME"] = str(xdg_data)
-        env["XDG_CONFIG_HOME"] = str(xdg_config)
         env["XORQ_CACHE_DIR"] = cache_dir
+        env["XDG_CONFIG_HOME"] = str(xdg_config)
+        if token_auth:  # isolated per-test HOME → named catalogs land under it, never the real store
+            env["HOME"] = str(home)
+            env["XDG_DATA_HOME"] = str(home / ".local" / "share")
+            env["XDG_CONFIG_HOME"] = str(home / ".config")
+            # but keep uv's package cache on the real (warm) location, else every test re-downloads
+            # the venv deps under the temp HOME and the -n 4 CI suite blows its time budget.
+            env["UV_CACHE_DIR"] = str(real_cache / "uv")
         if env_extra:
             env.update(env_extra)
         # Stream events (`--verbose --output-format stream-json`) to a per-call log instead
@@ -469,10 +502,19 @@ def run_claude(
                 "claude stream had no result event "
                 f"(exit {proc.returncode}):\n{_stream_tail(log_path, 40)}\n{(proc.stderr or '')[-2000:]}"
             )
-        return ClaudeRun(result=result, project=claude_project, xdg_data=xdg_data)
+        return ClaudeRun(result=result, project=claude_project, home=home,
+                         named_before=named_before, isolated_home=token_auth)
 
     yield _run
     shutil.rmtree(cache_dir, ignore_errors=True)
+    # Isolated (temp) HOME is auto-cleaned with tmp_path. On the real HOME, reap only the named
+    # catalogs this test created (anything new since `named_before`) so the store doesn't accumulate.
+    if not token_auth:
+        store = home / ".local" / "share" / "xorq" / "catalogs"
+        if store.exists():
+            for d in store.iterdir():
+                if d.is_dir() and d.name not in named_before and (d / "catalog.yaml").exists():
+                    shutil.rmtree(d, ignore_errors=True)
 
 
 # --- outcome assertions: verify the deterministic artifacts the skill produced ---
@@ -511,7 +553,7 @@ def source_hashes(xorq_bin: str, cat: Path) -> list:
 def source_entries(xorq_bin: str, run: ClaudeRun) -> list:
     """Every (catalog, hash) source entry the model created, across all places a
     catalog might land (repo-local in the project, or named under the isolated XDG home)."""
-    cats = sorted({d for root in run.catalog_search_dirs if root.exists() for d in _catalog_dirs(root)})
+    cats = run.all_catalog_dirs
     return [(cat, h) for cat in cats for h in source_hashes(xorq_bin, cat)]
 
 
@@ -583,7 +625,7 @@ def derived_entries(xorq_bin: str, run: ClaudeRun) -> list:
     excluded — we only want the derived results.
     """
     out = []
-    cats = sorted({d for root in run.catalog_search_dirs if root.exists() for d in _catalog_dirs(root)})
+    cats = run.all_catalog_dirs
     for cat in cats:
         for line in catalog_kinds(xorq_bin, cat).splitlines():
             parts = line.split()
@@ -657,7 +699,7 @@ def entries_by_kind(xorq_bin: str, run: ClaudeRun, kinds: Iterable[str]) -> list
     """(catalog, hash) for every entry whose ``list --kind`` kind is in ``kinds``."""
     kinds = set(kinds)
     out = []
-    cats = sorted({d for root in run.catalog_search_dirs if root.exists() for d in _catalog_dirs(root)})
+    cats = run.all_catalog_dirs
     for cat in cats:
         for line in catalog_kinds(xorq_bin, cat).splitlines():
             parts = line.split()
@@ -740,15 +782,10 @@ def assert_read_only(xorq_bin: str, cat: Path, before: tuple) -> None:
 # The penguins/iris CSVs are generated at runtime into the tmp project (iris from sklearn — offline;
 # penguins from the pinned xorq example — needs the examples bucket), so nothing is committed.
 #
-# NB: a catalog the model names ("call it iris") lands in xorq's GLOBAL named store
-# (``~/.local/share/xorq/catalogs/<name>`` — keyed off HOME with no env override, so it
-# can't be redirected into the per-test temp HOME without breaking claude's own auth).
-# So discovery here also searches NAMED_STORE. That's intended for CI (fresh runner per
-# run); locally these tests do populate the named store. Distinct tests use distinct names
-# (penguins / iris / bts-*), so this stays safe under ``pytest -n``.
+# NB: a catalog the model names ("call it iris") lands in xorq's HOME-keyed named store; the
+# run_claude fixture isolates that store per test (redirected HOME / reap-on-teardown), and
+# ``ClaudeRun.all_catalog_dirs`` is the single discovery surface (project + this run's named store).
 # ---------------------------------------------------------------------------
-
-NAMED_STORE = Path("~/.local/share/xorq/catalogs").expanduser()
 
 
 def github_reachable() -> bool:
@@ -802,10 +839,9 @@ def seed_iris(proj: Path) -> Path:
 
 
 def all_catalogs(run: ClaudeRun) -> list:
-    """Every catalog the run could have produced: repo-local in the project, under the per-test
-    XDG home, or in xorq's global named store (NAMED_STORE) where a ``-n <name>`` catalog lands."""
-    roots = list(run.catalog_search_dirs) + [NAMED_STORE]
-    return sorted({d for root in roots if root.exists() for d in _catalog_dirs(root)})
+    """Every catalog the run could have produced — repo-local in the project or named in this run's
+    HOME store (``ClaudeRun.all_catalog_dirs`` is the single, isolation-aware discovery surface)."""
+    return run.all_catalog_dirs
 
 
 def catalog_aliases(xorq_bin: str, cat: Path) -> list:
@@ -840,20 +876,12 @@ def catalog_with_aliases(xorq_bin: str, run: ClaudeRun, *needles: str) -> Path |
 def bts_candidate_catalogs(run: ClaudeRun) -> list:
     """Catalogs that could hold the BTS local copy + the entries composed onto it.
 
-    The model is told to make a *writable local copy* (the remote is read-only) and the STEER
-    points it at the working dir, so the copy is typically a repo-local catalog in the project —
-    and it need NOT carry the original `flights`/`semantic-flights` aliases (the model may compose
-    into a fresh catalog that references the cloned source). So we discover by SIGNATURE, not by
-    alias: everything in the project / XDG home, plus any global named-store catalog whose name
-    hints at BTS. Restricting the named-store side keeps the SQL/schema scan off the developer's
-    unrelated global catalogs.
+    The model makes a *writable local copy* of the read-only remote — a repo-local catalog in the
+    project or a named one in this run's store — and it need NOT carry the original
+    `flights`/`semantic-flights` aliases (it may compose into a fresh catalog that references the
+    cloned source), so callers discover by SIGNATURE. This is just all of this run's catalogs.
     """
-    cats = {d for root in run.catalog_search_dirs if root.exists() for d in _catalog_dirs(root)}
-    if NAMED_STORE.exists():
-        for d in _catalog_dirs(NAMED_STORE):
-            if any(k in d.name.lower() for k in ("bts", "flight", "semantic")):
-                cats.add(d)
-    return sorted(cats)
+    return run.all_catalog_dirs
 
 
 def catalog_entries(xorq_bin: str, cat: Path) -> list:
