@@ -38,6 +38,7 @@ from conftest import (
     assert_entry_runs,
     assert_grouped,
     builder_entries,
+    entries_by_kind,
     run_entry_rows,
     seed_builder_module,
     seed_catalog_sources,
@@ -90,15 +91,17 @@ def test_llm_builder_ml_predict(xorq_bin: str, claude_project: Path, run_claude:
     requiring a particular saved scored-prod entry was flaky because the agent varies run to run —
     it scores prod by recovering+printing (never persisting a re-runnable entry), or saves scored
     prod as a file rather than a catalog entry, or engineers features into the fit source (so a
-    fixed raw-prod predict can't reproduce them). The one constant is the fitted-pipeline
-    ``expr_builder`` entry, which IS ``fitted.predict(<train source>)`` — so running the entry
-    re-executes predict with any feature engineering baked into the graph, needing no knowledge of
-    the agent's features (verified: the entry runs to a prediction column, deterministically).
-    NOT accuracy: the fixture has no real purchase signal, so an AUC bar would only reward
-    overfitting and flake — deterministic score-on-held-out-data is covered by the iris e2e. Asserts:
+    fixed raw-prod predict can't reproduce them). We assert two durable facts instead: a
+    fitted-pipeline ``expr_builder`` entry exists (the model round-trips through the catalog), and
+    SOME catalogued entry runs to a prediction column — the predict result is a tagged expr_builder
+    or a plain expr/composed the agent saved, so we search all derived kinds and execute via extract
+    + ``xorq run``, which reproduces predict with any feature engineering baked into the entry's
+    graph (no knowledge of the agent's features needed). NOT accuracy: the fixture has no real
+    purchase signal, so an AUC bar would only reward overfitting and flake — deterministic
+    score-on-held-out-data is covered by the iris e2e. Asserts:
       - a fitted-pipeline expr_builder entry exists (the model round-trips through the catalog),
-      - running it yields a prediction column over its rows (the model actually predicts), and
-      - re-running is byte-identical (deterministic — the same fitted model came back).
+      - some catalogued entry runs to a prediction column (the model actually predicts), and
+      - re-running it is byte-identical (deterministic — the same fitted model came back).
     """
     seed_catalog_sources(xorq_bin, claude_project, ["events_dev", "events_prod"])
     run = run_claude(Builder.ML_PURCHASE, timeout=900)
@@ -108,15 +111,30 @@ def test_llm_builder_ml_predict(xorq_bin: str, claude_project: Path, run_claude:
 
     canon = lambda rows: sorted(json.dumps(r, sort_keys=True) for r in rows)  # order-insensitive
 
-    # the fitted-pipeline entry IS fitted.predict(<train>); run_entry_rows executes it (extract +
-    # xorq run for a materialized source), reproducing predict with the engineering in the graph.
+    # Find a catalogued entry that runs to a prediction column. The predict result is usually a
+    # tagged expr_builder, but the agent sometimes lands it as a plain expr/composed (e.g. saving
+    # scored events). run_entry_rows executes via extract + xorq run, reproducing predict with any
+    # feature engineering baked into the entry's graph — so this needs no knowledge of the features.
+    scanned = entries_by_kind(xorq_bin, run, ("expr_builder", "expr", "composed", "source"))
     pred = None  # (cat, h, rows)
-    for cat, h in builders:
+    for cat, h in scanned:
         rows = run_entry_rows(xorq_bin, cat, h, limit=2000)
         if rows and _prediction_columns(rows[0]):
             pred = (cat, h, rows)
             break
-    assert pred, f"no fitted-pipeline entry runs to predictions\nclaude said: {run.said}"
+
+    if pred is None:
+        # Dump what the agent DID catalogue (kind + run columns) so a failure is diagnosable rather
+        # than another blind guess at agent behavior.
+        diag = []
+        for cat, h in scanned:
+            r = run_entry_rows(xorq_bin, cat, h, limit=5)
+            diag.append(f"  {h} [{cat.name}] -> {len(r)} rows, cols={list(r[0].keys()) if r else []}")
+        raise AssertionError(
+            "no catalogued entry runs to a prediction column\nentries:\n"
+            + ("\n".join(diag) or "  (none)")
+            + f"\nclaude said: {run.said}"
+        )
 
     # round-trip determinism: re-running reproduces it exactly (the same fitted model came back)
     cat, h, rows = pred
