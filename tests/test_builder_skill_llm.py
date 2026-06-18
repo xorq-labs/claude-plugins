@@ -77,9 +77,12 @@ def test_llm_builder_spend_by_tier_join(xorq_bin: str, claude_project: Path, run
 
 
 def _prediction_columns(row: dict) -> list:
+    # Match the column the model writes its output to. The name varies by agent run — `predict`,
+    # `predicted`, `prediction`, or a `<target>_pred` suffix (e.g. `is_purchase_pred`) — so match
+    # the `pred` stem (covers predict/pred/predicted/prediction) plus the other sklearn-ish names.
     return [
         c for c in row
-        if "predict" in c.lower() or c.lower() in ("prediction", "score", "label", "predicted", "proba")
+        if "pred" in c.lower() or c.lower() in ("score", "label", "proba", "probability")
     ]
 
 
