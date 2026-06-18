@@ -24,6 +24,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import zipfile
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
@@ -162,10 +163,14 @@ PLUGIN_DIR = REPO / "xorq"
 # resolution tells the model to *ask* how to resolve the catalog when none exists.
 # This removes that one blocker — it does NOT tell the model how to ingest. The plugin
 # ships no CLAUDE.md; its SessionStart hook injects the shared essentials (skills/_shared/essentials.md).
+#
+# We do NOT steer the catalog *location*: the model should resolve it the way the skill says
+# (non-interactively that means a NAMED catalog), so the suite tests the realistic flow. Isolation
+# is handled by the run_claude fixture (per-test HOME when auth is token-based; reap-on-teardown
+# otherwise), not by forcing repo-local.
 STEER = (
     "Non-interactive session: when a skill would ask the user a question, pick the "
-    "recommended default and proceed without asking. For catalog resolution, create a "
-    "new repo-local catalog in the current working directory."
+    "recommended default and proceed without asking."
 )
 
 POSTGRES_ENV = {
@@ -219,17 +224,30 @@ def _stream_result(path: Path) -> dict | None:
 
 @attrs.define
 class ClaudeRun:
-    """Outcome of one headless claude session: the parsed result + where any catalog
-    it created might live (repo-local in the project, or a named catalog under the
-    isolated XDG data home)."""
+    """Outcome of one headless claude session: the parsed result + where any catalog it created
+    might live — repo-local in the project, or a NAMED catalog in xorq's HOME-keyed store
+    (``$HOME/.local/share/xorq/catalogs``). The model is free to choose (the skill's non-interactive
+    default is a named catalog), so we discover both. ``home`` is the HOME the agent ran under: a
+    per-test temp dir when isolated (named store starts empty → every catalog is this run's), else
+    the real HOME (``named_before`` records what pre-existed so we only count this run's catalogs)."""
 
     result: dict
     project: Path
-    xdg_data: Path
+    home: Path
+    named_before: frozenset = frozenset()
+    isolated_home: bool = False
 
     @property
-    def catalog_search_dirs(self) -> list:
-        return [self.project, self.xdg_data / "xorq" / "catalogs"]
+    def all_catalog_dirs(self) -> list:
+        """Every catalog this run could have produced: repo-local catalogs in the project plus
+        named catalogs in this run's HOME store (scoped to those created during the run)."""
+        dirs = set(_catalog_dirs(self.project)) if self.project.exists() else set()
+        store = self.home / ".local" / "share" / "xorq" / "catalogs"
+        if store.exists():
+            for d in store.iterdir():
+                if (d / "catalog.yaml").exists() and (self.isolated_home or d.name not in self.named_before):
+                    dirs.add(d)
+        return sorted(dirs)
 
     @property
     def is_error(self) -> bool:
@@ -392,30 +410,54 @@ def run_claude(
 ) -> Iterator[Callable[..., ClaudeRun]]:
     """Returns ``run(prompt, *, env_extra=None, timeout=300) -> ClaudeRun``.
 
-    Each call runs ``claude -p`` headless with the xorq plugin loaded, in the temp project
-    (cwd); the plugin's SessionStart hook injects the shared essentials (no ambient CLAUDE.md). Per-test isolation (so the suite is safe under
-    ``pytest -n``): the catalog store + profiles via a redirected XDG home, and the parquet
-    cache via a unique ``XORQ_CACHE_DIR`` under /tmp. HOME is left real so claude's own auth
-    keeps working. The /tmp cache dir is removed on teardown.
+    Each call runs ``claude -p`` headless with the xorq plugin loaded, in the temp project (cwd);
+    the plugin's SessionStart hook injects the shared essentials (no ambient CLAUDE.md).
+
+    Per-test catalog isolation lets the model do the REALISTIC thing — create a NAMED catalog (the
+    skill's non-interactive default), which xorq keeps in ``$HOME/.local/share/xorq/catalogs``. To
+    isolate that shared HOME-keyed store we redirect HOME to a per-test temp dir — but only when
+    claude auth is token-based (``CLAUDE_CODE_OAUTH_TOKEN`` / ``ANTHROPIC_API_KEY``, both
+    HOME-independent), as in CI. With a redirected HOME each test gets its own empty named store, so
+    named-catalog creation can't collide under ``pytest -n``. When auth is a local OAuth login (in
+    ``~/.claude``), redirecting HOME would break it, so we keep the real HOME and instead reap the
+    catalogs this test created on teardown. Cache is a unique ``XORQ_CACHE_DIR`` either way.
     """
     append = STEER  # plugin ships no CLAUDE.md; skills inject the shared essentials themselves
     # Optionally pin the model (e.g. XORQ_CLAUDE_PLUGIN_TEST_MODEL=sonnet to run the
     # Opus-slow llm suite faster/cheaper). Unset -> claude's session default.
     model = os.environ.get("XORQ_CLAUDE_PLUGIN_TEST_MODEL")
-    xdg_data = tmp_path / "xdg-data"
-    xdg_config = tmp_path / "xdg-config"
-    xdg_data.mkdir()
-    xdg_config.mkdir()
     cache_dir = tempfile.mkdtemp(prefix="xorq-test-cache-", dir="/tmp")
+
+    # Token auth is HOME-independent → safe to redirect HOME (full per-test named-store isolation).
+    # OAuth login lives in ~/.claude → keep the real HOME and reap this test's catalogs on teardown.
+    token_auth = bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"))
+    real_cache = Path.home() / ".cache"  # keep uv's warm cache reachable across a HOME redirect
+    if token_auth:
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".gitconfig").write_text("[user]\n\tname = xorq e2e\n\temail = e2e@xorq.dev\n")
+        named_before: frozenset = frozenset()
+    else:
+        home = Path.home()
+        store = home / ".local" / "share" / "xorq" / "catalogs"
+        named_before = frozenset(p.name for p in store.iterdir() if p.is_dir()) if store.exists() else frozenset()
+    xdg_config = tmp_path / "xdg-config"
+    xdg_config.mkdir()
 
     runs = {"n": 0}
 
     def _run(prompt, *, env_extra=None, timeout=420) -> ClaudeRun:
         env = os.environ.copy()
         env.pop("XORQ_DEFAULT_CATALOG", None)
-        env["XDG_DATA_HOME"] = str(xdg_data)
-        env["XDG_CONFIG_HOME"] = str(xdg_config)
         env["XORQ_CACHE_DIR"] = cache_dir
+        env["XDG_CONFIG_HOME"] = str(xdg_config)
+        if token_auth:  # isolated per-test HOME → named catalogs land under it, never the real store
+            env["HOME"] = str(home)
+            env["XDG_DATA_HOME"] = str(home / ".local" / "share")
+            env["XDG_CONFIG_HOME"] = str(home / ".config")
+            # but keep uv's package cache on the real (warm) location, else every test re-downloads
+            # the venv deps under the temp HOME and the -n 4 CI suite blows its time budget.
+            env["UV_CACHE_DIR"] = str(real_cache / "uv")
         if env_extra:
             env.update(env_extra)
         # Stream events (`--verbose --output-format stream-json`) to a per-call log instead
@@ -460,10 +502,19 @@ def run_claude(
                 "claude stream had no result event "
                 f"(exit {proc.returncode}):\n{_stream_tail(log_path, 40)}\n{(proc.stderr or '')[-2000:]}"
             )
-        return ClaudeRun(result=result, project=claude_project, xdg_data=xdg_data)
+        return ClaudeRun(result=result, project=claude_project, home=home,
+                         named_before=named_before, isolated_home=token_auth)
 
     yield _run
     shutil.rmtree(cache_dir, ignore_errors=True)
+    # Isolated (temp) HOME is auto-cleaned with tmp_path. On the real HOME, reap only the named
+    # catalogs this test created (anything new since `named_before`) so the store doesn't accumulate.
+    if not token_auth:
+        store = home / ".local" / "share" / "xorq" / "catalogs"
+        if store.exists():
+            for d in store.iterdir():
+                if d.is_dir() and d.name not in named_before and (d / "catalog.yaml").exists():
+                    shutil.rmtree(d, ignore_errors=True)
 
 
 # --- outcome assertions: verify the deterministic artifacts the skill produced ---
@@ -502,7 +553,7 @@ def source_hashes(xorq_bin: str, cat: Path) -> list:
 def source_entries(xorq_bin: str, run: ClaudeRun) -> list:
     """Every (catalog, hash) source entry the model created, across all places a
     catalog might land (repo-local in the project, or named under the isolated XDG home)."""
-    cats = sorted({d for root in run.catalog_search_dirs if root.exists() for d in _catalog_dirs(root)})
+    cats = run.all_catalog_dirs
     return [(cat, h) for cat in cats for h in source_hashes(xorq_bin, cat)]
 
 
@@ -559,7 +610,8 @@ def assert_sources(
     )
     if run_one:
         cat, h = entries[0]
-        assert catalog_run_rows(xorq_bin, cat, h), \
+        # run_entry_rows: bare run for a deferred source, extract+xorq-run for a materialized one.
+        assert run_entry_rows(xorq_bin, cat, h, limit=3), \
             f"source {h} produced no rows\nclaude said: {run.said}"
 
 
@@ -574,7 +626,7 @@ def derived_entries(xorq_bin: str, run: ClaudeRun) -> list:
     excluded — we only want the derived results.
     """
     out = []
-    cats = sorted({d for root in run.catalog_search_dirs if root.exists() for d in _catalog_dirs(root)})
+    cats = run.all_catalog_dirs
     for cat in cats:
         for line in catalog_kinds(xorq_bin, cat).splitlines():
             parts = line.split()
@@ -624,7 +676,10 @@ def assert_derived(xorq_bin: str, run: ClaudeRun, check: Callable, *, limit: int
     assert ent, f"no composed/expr entry created\nclaude said: {run.said}"
     last = None
     for cat, h in ent:
-        rows = catalog_run_rows(xorq_bin, cat, h, limit=limit)
+        # run_entry_rows tries bare ``catalog run`` first, then extract + ``xorq run`` — the
+        # latter is what replays a derived entry whose plan bundles a materialized source or a
+        # cross-backend transfer (bare run yields 0 rows for those on 0.3.30).
+        rows = run_entry_rows(xorq_bin, cat, h, limit=limit)
         if not rows:
             last = "entry produced no rows"
             continue
@@ -648,7 +703,7 @@ def entries_by_kind(xorq_bin: str, run: ClaudeRun, kinds: Iterable[str]) -> list
     """(catalog, hash) for every entry whose ``list --kind`` kind is in ``kinds``."""
     kinds = set(kinds)
     out = []
-    cats = sorted({d for root in run.catalog_search_dirs if root.exists() for d in _catalog_dirs(root)})
+    cats = run.all_catalog_dirs
     for cat in cats:
         for line in catalog_kinds(xorq_bin, cat).splitlines():
             parts = line.split()
@@ -670,7 +725,11 @@ def assert_entry_runs(
     assert ents, f"no entry of kinds {tuple(kinds)} created\nclaude said: {run.said}"
     last = None
     for cat, h in ents:
-        rows = catalog_run_rows(xorq_bin, cat, h, limit=limit)
+        # run_entry_rows (not bare catalog_run_rows): a builder over a cross-backend join
+        # serializes a plan that bare ``catalog run`` can't replay (returns 0 rows on 0.3.30),
+        # but extracting the build and ``xorq run``-ing it executes the plan in-process. The
+        # fallback makes the run independent of the entry's source/join shape.
+        rows = run_entry_rows(xorq_bin, cat, h, limit=limit)
         if not rows:
             last = "entry produced no rows"
             continue
@@ -719,3 +778,256 @@ def assert_read_only(xorq_bin: str, cat: Path, before: tuple) -> None:
     assert after == before, (
         f"catalog changed — explore must be read-only\n  before: {before}\n  after:  {after}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Integration e2e (multi-skill) — clone+compose (BTS), ingest+compose (penguins),
+# ml x2 (iris). One casual prompt drives a whole flow; assertions run on the
+# deterministic artifacts. These reuse the discovery/run helpers above and add:
+#   - catalog lookup by NAME (penguins/iris) and by CONTENT (the BTS local copy),
+#   - SQL introspection (stored `sql_queries`) for structural checks without executing, and
+#   - model scoring via the builder round-trip (AUC / MSE) for the iris models.
+# The penguins/iris CSVs are generated at runtime into the tmp project (iris from sklearn — offline;
+# penguins from the pinned xorq example — needs the examples bucket), so nothing is committed.
+#
+# NB: a catalog the model names ("call it iris") lands in xorq's HOME-keyed named store; the
+# run_claude fixture isolates that store per test (redirected HOME / reap-on-teardown), and
+# ``ClaudeRun.all_catalog_dirs`` is the single discovery surface (project + this run's named store).
+# ---------------------------------------------------------------------------
+
+
+def github_reachable() -> bool:
+    """True if a TCP connection to github.com:443 opens within 3s (gates the BTS test)."""
+    try:
+        with socket.create_connection(("github.com", 443), timeout=3):
+            return True
+    except OSError:
+        return False
+
+
+def seed_penguins(proj: Path) -> Path:
+    """Write ``proj/data/penguins.csv`` from the pinned xorq example, returning its path.
+
+    Generated at runtime (not committed) — the prompt references data/penguins.csv. Pulls from the
+    examples bucket, so it skips the test if that data can't be fetched.
+    """
+    import xorq.examples as ex
+
+    try:
+        df = ex.penguins.fetch(backend=xo.connect()).execute()
+    except Exception as e:  # network / examples bucket unavailable
+        pytest.skip(f"penguins example data unavailable: {e}")
+    data = proj / "data"
+    data.mkdir(exist_ok=True)
+    path = data / "penguins.csv"
+    df.to_csv(path, index=False)
+    return path
+
+
+def seed_iris(proj: Path) -> Path:
+    """Write ``proj/data/iris.csv`` from sklearn (bundled, offline), returning its path.
+
+    Generated at runtime (not committed). Columns are normalized to snake_case and the integer
+    target is mapped to species names, so the source is the familiar
+    {sepal_length, sepal_width, petal_length, petal_width, species}.
+    """
+    from sklearn.datasets import load_iris
+
+    d = load_iris(as_frame=True)
+    df = d.frame.rename(columns={
+        "sepal length (cm)": "sepal_length", "sepal width (cm)": "sepal_width",
+        "petal length (cm)": "petal_length", "petal width (cm)": "petal_width",
+    })
+    df["species"] = df.pop("target").map(dict(enumerate(d.target_names)))
+    data = proj / "data"
+    data.mkdir(exist_ok=True)
+    path = data / "iris.csv"
+    df.to_csv(path, index=False)
+    return path
+
+
+def all_catalogs(run: ClaudeRun) -> list:
+    """Every catalog the run could have produced — repo-local in the project or named in this run's
+    HOME store (``ClaudeRun.all_catalog_dirs`` is the single, isolation-aware discovery surface)."""
+    return run.all_catalog_dirs
+
+
+def catalog_aliases(xorq_bin: str, cat: Path) -> list:
+    """The alias names defined in a catalog (``list-aliases``)."""
+    return [ln.strip() for ln in _xq(xorq_bin, "catalog", "-p", str(cat), "list-aliases").stdout.splitlines() if ln.strip()]
+
+
+def named_catalog(run: ClaudeRun, *needles: str) -> Path | None:
+    """The catalog whose directory name contains any ``needle`` (case-insensitive).
+
+    The user names these catalogs ("call it iris"), so the model creates a catalog whose
+    location carries that name — repo-local ``./iris`` or a named ``iris`` under XDG both match.
+    """
+    for cat in all_catalogs(run):
+        low = cat.name.lower()
+        if any(n.lower() in low for n in needles):
+            return cat
+    return None
+
+
+def catalog_with_aliases(xorq_bin: str, run: ClaudeRun, *needles: str) -> Path | None:
+    """The catalog that defines any of ``needles`` as an alias — identifies a catalog by its
+    CONTENT rather than its name (the BTS local copy, whatever the model named the clone dir,
+    is the one that carries ``flights`` / ``semantic-flights``)."""
+    want = set(needles)
+    for cat in all_catalogs(run):
+        if want & set(catalog_aliases(xorq_bin, cat)):
+            return cat
+    return None
+
+
+def bts_candidate_catalogs(run: ClaudeRun) -> list:
+    """Catalogs that could hold the BTS local copy + the entries composed onto it.
+
+    The model makes a *writable local copy* of the read-only remote — a repo-local catalog in the
+    project or a named one in this run's store — and it need NOT carry the original
+    `flights`/`semantic-flights` aliases (it may compose into a fresh catalog that references the
+    cloned source), so callers discover by SIGNATURE. This is just all of this run's catalogs.
+    """
+    return run.all_catalog_dirs
+
+
+def catalog_entries(xorq_bin: str, cat: Path) -> list:
+    """(hash, kind) for every entry in a catalog (``list --kind`` rows: ``<hash>\\t<kind>``)."""
+    out = []
+    for line in catalog_kinds(xorq_bin, cat).splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            out.append((parts[0], parts[1]))
+    return out
+
+
+def derived_in(xorq_bin: str, cat: Path) -> list:
+    """Hashes of the ``composed`` / ``expr`` (derived) entries in one catalog."""
+    return [h for h, k in catalog_entries(xorq_bin, cat) if k in ("composed", "expr")]
+
+
+def derived_rows(xorq_bin: str, cat: Path, *, limit: int = 400) -> list:
+    """Every row from running all derived entries in a catalog (union across entries).
+
+    The model may answer a two-part question ("heaviest AND tiniest") in one entry or split it
+    across two, so callers check the union rather than any single entry's rows.
+    """
+    rows = []
+    for h in derived_in(xorq_bin, cat):
+        rows += run_entry_rows(xorq_bin, cat, h, limit=limit)  # bare run, then extract+xorq-run fallback
+    return rows
+
+
+def entry_sql(xorq_bin: str, cat: Path, ident: str) -> str:
+    """The entry's stored ``sql_queries`` concatenated and lowercased (``schema --json``).
+
+    Lets a test prove an expression's STRUCTURE — which columns/filters it encodes — without
+    executing it (so the BTS expressions, whose data isn't cached, are still checkable). Empty
+    string for entries that expose no SQL (e.g. a plain source).
+    """
+    raw = _xq(xorq_bin, "catalog", "-p", str(cat), "schema", str(ident), "--json").stdout
+    try:
+        d = json.loads(raw)
+    except json.JSONDecodeError:
+        return ""
+    parts = []
+    for q in d.get("sql_queries") or []:
+        parts += [str(x) for x in q] if isinstance(q, (list, tuple)) else [str(q)]
+    return "\n".join(parts).lower()
+
+
+def run_entry_rows(xorq_bin: str, cat: Path, ident: str, *, limit: int = 200) -> list:
+    """Run a catalog entry and return its JSON rows, robust to BOTH source forms.
+
+    Tries ``catalog run`` first (resolves a deferred / re-readable source), then falls back to
+    extracting the build archive and ``xorq run``-ing the build dir — which is what works for a
+    MATERIALIZED read_parquet source, whose bundled relative ``database_tables/*.parquet`` only
+    resolves inside the extracted build (``catalog run`` returns 0 rows for those in 0.3.29). The two
+    paths are complementary, so trying both makes the run independent of how the model ingested.
+    Accepts an alias (resolved via ``aliases/<name>.zip``) or a content hash; ``[]`` if neither works.
+    """
+    rows = catalog_run_rows(xorq_bin, cat, ident, limit=limit)
+    if rows:
+        return rows
+    cat = Path(cat)
+    archive = cat / "aliases" / f"{ident}.zip"
+    if not archive.exists():
+        archive = cat / "entries" / f"{ident}.zip"
+    if not archive.exists():
+        return []
+    tmp = Path(tempfile.mkdtemp(prefix="xorq-entry-"))
+    try:
+        with zipfile.ZipFile(archive.resolve()) as zf:
+            zf.extractall(tmp)
+        builds = [p.parent for p in tmp.rglob("expr.yaml")]
+        if not builds:
+            return []
+        r = subprocess.run(
+            [xorq_bin, "run", str(builds[0]), "-o", "-", "-f", "json", "--limit", str(limit)],
+            capture_output=True, text=True, timeout=300,
+        )
+        return [json.loads(ln) for ln in r.stdout.splitlines() if ln.strip().startswith("{")]
+    except (zipfile.BadZipFile, subprocess.TimeoutExpired):
+        return []
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def entry_show(xorq_bin: str, cat: Path, ident: str) -> str:
+    """An entry's ``catalog show`` text, lowercased — used to assert a builder's kind.
+
+    For a fitted-pipeline expr_builder this reports ``Type: Expression Builder`` plus a
+    ``Type: fitted_pipeline`` block (steps + target), so a test can confirm the model is a
+    FittedPipeline (not just any builder) — the same string the ml skill's Verify step checks.
+    """
+    return _xq(xorq_bin, "catalog", "-p", str(cat), "show", str(ident)).stdout.lower()
+
+
+def builder_metric(
+    xorq_bin: str, cat: Path, ident: str, data_csv: Path, scorer: str
+) -> float | None:
+    """Recover a FittedPipeline from a catalogued entry and score it on ``data_csv``.
+
+    Runs the skill's documented round-trip (``run -c 'source.ls.builder.score_expr(...)'``) with
+    an sklearn ``scorer`` name and returns the scalar metric. Returns ``None`` when the scorer
+    doesn't apply to that model (a regression scorer on a classifier errors to no rows, and vice
+    versa) — which is exactly how a caller tells the classifier and the regressor apart.
+    """
+    code = (
+        f"source.ls.builder.score_expr("
+        f"xo.deferred_read_csv({str(Path(data_csv).resolve())!r}), scorer={scorer!r})"
+    )
+    r = _xq(xorq_bin, "catalog", "-p", str(cat), "run", str(ident),
+            "--use-this-venv", "-c", code, "-o", "-", "-f", "json")
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        nums = [v for v in row.values() if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if nums:
+            return float(nums[0])
+    return None
+
+
+def catalog_run_code_rows(
+    xorq_bin: str, cat: Path, ident: str, code: str, *, limit: int = 200
+) -> list:
+    """Recover a catalogued entry's builder via ``run -c '<code>'`` and return its JSON rows.
+
+    ``code`` is the skill's sandboxed expression over ``source`` (the entry's expr) /
+    ``source.ls.builder`` (the recovered builder) — e.g.
+    ``source.ls.builder.predict(xo.deferred_read_parquet('/abs/new.parquet'))``. Returns ``[]``
+    when the code errors (so callers can probe alternatives). This is the deterministic way to
+    exercise a fitted-pipeline entry: the pipeline carries its own feature columns, so predicting
+    on the raw held-out file needs no knowledge of the model's exact features.
+    """
+    r = _xq(
+        xorq_bin, "catalog", "-p", str(cat), "run", str(ident),
+        "--use-this-venv", "-c", code, "-o", "-", "-f", "json", "--limit", str(limit),
+    )
+    return [json.loads(ln) for ln in r.stdout.splitlines() if ln.strip().startswith("{")]

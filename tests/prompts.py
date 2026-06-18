@@ -89,3 +89,50 @@ class Builder(StrEnum):
         "catalog, recover the builder from it, switch it to the last 3 characters, and save that "
         "as a new entry."
     )
+
+
+class Integration(StrEnum):
+    """Multi-skill end-to-end scenarios — each prompt exercises a whole flow, not one skill.
+
+    These are the heaviest e2e cases: a single casual request that the model must decompose
+    across skills (acquire/clone -> compose, or ingest -> ml). Still user-voice and naming no
+    aliases/commands, but each names enough to be achievable headless — which catalog to make,
+    or that the remote catalog is read-only so a local copy is needed.
+
+    SEMANTIC_BTS leans on a public catalog (the `xorq-catalog-bts` submodule of semantic-bts),
+    which ships a `flights` source + a `semantic-flights` BSL model. Its flight data is fetched
+    on demand from BTS and isn't cached here, so the deliverable is *composed + catalogued*
+    expressions (build is lazy and offline) — the prompt says not to execute them.
+    """
+
+    # clone-the-remote -> compose: one expr answering the flights question, one off the
+    # semantic model showing delay-by-time-block for departures AND arrivals.
+    SEMANTIC_BTS = (
+        "Go grab the xorq flights catalog from https://github.com/xorq-labs/semantic-bts — it "
+        "ships a xorq catalog (the xorq-catalog-bts submodule) with a `flights` source and a "
+        "`semantic-flights` semantic model. We can't and shouldn't sync back to that remote — work "
+        "entirely in a local copy you can write to, and don't push anything. The underlying flight "
+        "data is large and isn't cached in here, "
+        "so don't run the queries — just compose the expressions and save them to your local "
+        "catalog. First: how many flights go into Ohio on Mondays and out of California on Tuesdays? "
+        "Then, using the semantic model, build one that's keyed by the departure time-of-day block — "
+        "exactly one row per block — with two measures on each row: the average departure delay and "
+        "the average arrival delay (ordered by block). I just want those two delay numbers per "
+        "departure block, not a departure-by-arrival-block breakdown — so I can see whether delays "
+        "build up later in the day."
+    )
+
+    # ingest -> compose: stand up a named catalog from a local file, then derive the answer.
+    PENGUINS = (
+        "I've got penguin data in my project at data/penguins.csv. Add it to a new catalog called "
+        "penguins, then compose an expression that tells me which is the heaviest penguin and which "
+        "is the tiniest, and save that to the catalog too."
+    )
+
+    # ml x2 (from_instance): two fitted pipelines on one catalog — a classifier and a regressor.
+    IRIS = (
+        "Make another catalog, call it iris, from my data at data/iris.csv. Then build two ML models "
+        "on it and save both to the catalog: one that predicts which type of iris it is (the species), "
+        "and one that predicts how wide the petals are (the petal width). Use a from-instance sklearn "
+        "pipeline for each."
+    )

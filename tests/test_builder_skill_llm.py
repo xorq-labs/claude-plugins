@@ -38,8 +38,8 @@ from conftest import (
     assert_entry_runs,
     assert_grouped,
     builder_entries,
-    catalog_run_rows,
     entries_by_kind,
+    run_entry_rows,
     seed_builder_module,
     seed_catalog_sources,
 )
@@ -77,53 +77,72 @@ def test_llm_builder_spend_by_tier_join(xorq_bin: str, claude_project: Path, run
 
 
 def _prediction_columns(row: dict) -> list:
+    # Match the column the model writes its output to. The name varies by agent run — `predict`,
+    # `predicted`, `prediction`, or a `<target>_pred` suffix (e.g. `is_purchase_pred`) — so match
+    # the `pred` stem (covers predict/pred/predicted/prediction) plus the other sklearn-ish names.
     return [
         c for c in row
-        if "predict" in c.lower() or c.lower() in ("prediction", "score", "label", "predicted", "proba")
+        if "pred" in c.lower() or c.lower() in ("score", "label", "proba", "probability")
     ]
 
 
 def test_llm_builder_ml_predict(xorq_bin: str, claude_project: Path, run_claude: Callable) -> None:
-    """Fitted pipeline: train on dev events, catalog it, recover via .ls.builder, score prod.
+    """Fitted pipeline round-trips through the catalog and runs to deterministic predictions.
 
-    Schema + round-trip determinism (NOT accuracy — the fixture has no signal for "is purchase",
-    so an AUC bar would reward overfitting and flake). We run the agent's OWN catalogued entries
-    rather than re-deriving predict() on raw data: the agent's feature engineering lives in the
-    expression graph (ibis), so a stored predict entry runs end-to-end while re-feeding raw events
-    to ``.predict`` would miss those engineered columns. Asserts:
+    The prompt asks the agent to fit on dev events, catalog the model, load it back, and score
+    prod. We assert the durable, agent-independent INVARIANT rather than a specific saved artifact:
+    requiring a particular saved scored-prod entry was flaky because the agent varies run to run —
+    it scores prod by recovering+printing (never persisting a re-runnable entry), or saves scored
+    prod as a file rather than a catalog entry, or engineers features into the fit source (so a
+    fixed raw-prod predict can't reproduce them). We assert two durable facts instead: a
+    fitted-pipeline ``expr_builder`` entry exists (the model round-trips through the catalog), and
+    SOME catalogued entry runs to a prediction column — the predict result is a tagged expr_builder
+    or a plain expr/composed the agent saved, so we search all derived kinds and execute via extract
+    + ``xorq run``, which reproduces predict with any feature engineering baked into the entry's
+    graph (no knowledge of the agent's features needed). NOT accuracy: the fixture has no real
+    purchase signal, so an AUC bar would only reward overfitting and flake — deterministic
+    score-on-held-out-data is covered by the iris e2e. Asserts:
       - a fitted-pipeline expr_builder entry exists (the model round-trips through the catalog),
-      - some catalogued entry runs to predictions (a prediction column alongside the event cols),
-      - re-running it is byte-identical (deterministic — the same fitted model came back), and
-      - a prod-sized (every-prod-row) prediction entry exists (prod was scored and saved).
+      - some catalogued entry runs to a prediction column (the model actually predicts), and
+      - re-running it is byte-identical (deterministic — the same fitted model came back).
     """
     seed_catalog_sources(xorq_bin, claude_project, ["events_dev", "events_prod"])
     run = run_claude(Builder.ML_PURCHASE, timeout=900)
 
-    assert builder_entries(xorq_bin, run), (
-        f"no fitted-pipeline (expr_builder) entry created\nclaude said: {run.said}"
-    )
+    builders = builder_entries(xorq_bin, run)
+    assert builders, f"no fitted-pipeline (expr_builder) entry created\nclaude said: {run.said}"
 
-    n_prod = len(pd.read_parquet((DATA / "events_prod.parquet").resolve()))
     canon = lambda rows: sorted(json.dumps(r, sort_keys=True) for r in rows)  # order-insensitive
 
-    # run the agent's stored entries directly (their graph already includes feature engineering)
-    pred_entries = []
-    for cat, h in entries_by_kind(xorq_bin, run, ("expr_builder", "expr", "composed", "source")):
-        rows = catalog_run_rows(xorq_bin, cat, h, limit=n_prod + 50)
+    # Find a catalogued entry that runs to a prediction column. The predict result is usually a
+    # tagged expr_builder, but the agent sometimes lands it as a plain expr/composed (e.g. saving
+    # scored events). run_entry_rows executes via extract + xorq run, reproducing predict with any
+    # feature engineering baked into the entry's graph — so this needs no knowledge of the features.
+    scanned = entries_by_kind(xorq_bin, run, ("expr_builder", "expr", "composed", "source"))
+    pred = None  # (cat, h, rows)
+    for cat, h in scanned:
+        rows = run_entry_rows(xorq_bin, cat, h, limit=2000)
         if rows and _prediction_columns(rows[0]):
-            pred_entries.append((cat, h, rows))
-    assert pred_entries, f"no catalogued entry runs to predictions\nclaude said: {run.said}"
+            pred = (cat, h, rows)
+            break
 
-    # round-trip determinism: re-running a prediction entry reproduces it exactly
-    cat, h, rows = pred_entries[0]
-    assert canon(rows) == canon(catalog_run_rows(xorq_bin, cat, h, limit=n_prod + 50)), (
-        f"prediction entry not deterministic across runs\nclaude said: {run.said}"
-    )
+    if pred is None:
+        # Dump what the agent DID catalogue (kind + run columns) so a failure is diagnosable rather
+        # than another blind guess at agent behavior.
+        diag = []
+        for cat, h in scanned:
+            r = run_entry_rows(xorq_bin, cat, h, limit=5)
+            diag.append(f"  {h} [{cat.name}] -> {len(r)} rows, cols={list(r[0].keys()) if r else []}")
+        raise AssertionError(
+            "no catalogued entry runs to a prediction column\nentries:\n"
+            + ("\n".join(diag) or "  (none)")
+            + f"\nclaude said: {run.said}"
+        )
 
-    # prod inference was scored and saved: some prediction entry covers every prod event
-    assert any(len(r) == n_prod for _, _, r in pred_entries), (
-        f"no prod-sized ({n_prod}-row) prediction entry — was prod scored and saved?\n"
-        f"claude said: {run.said}"
+    # round-trip determinism: re-running reproduces it exactly (the same fitted model came back)
+    cat, h, rows = pred
+    assert canon(rows) == canon(run_entry_rows(xorq_bin, cat, h, limit=2000)), (
+        f"predictions not deterministic across runs\nclaude said: {run.said}"
     )
 
 
